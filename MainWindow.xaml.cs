@@ -1,10 +1,9 @@
-﻿using System.Collections.ObjectModel;
-using System.IO;
-using System.Windows;
+﻿using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Ink;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Threading;
 using Microsoft.Win32;
 using YogaNotes.Controls;
 using YogaNotes.Models;
@@ -15,6 +14,10 @@ namespace YogaNotes;
 public partial class MainWindow : Window
 {
     private readonly NoteStorageService _storageService;
+    private readonly HandwritingRecognitionService _handwritingService;
+    private readonly DispatcherTimer _handwritingTimer;
+    private readonly List<Stroke> _pendingHandwritingStrokes = new();
+
     private List<Notebook> _notebooks = new();
     private Notebook? _currentNotebook;
     private Section? _currentSection;
@@ -26,10 +29,15 @@ public partial class MainWindow : Window
     private readonly Stack<StrokeCollection> _redoStack = new();
     private bool _isApplyingHistory = false;
 
-    // Active drawing settings
-    private Color _currentPenColor = Color.FromRgb(15, 23, 42); // Black
+    // Active drawing settings (separate colors for Pen vs Highlighter)
+    private Color _currentPenColor = Color.FromRgb(15, 23, 42);        // Black
+    private Color _currentHighlighterColor = Color.FromRgb(250, 204, 21); // Bright Yellow
     private double _currentStrokeThickness = 2.0;
+    private HandwritingLanguage _handwritingLanguage = HandwritingLanguage.English;
+
+    // Responsive sidebar state
     private bool _isSidebarVisible = true;
+    private bool _userManuallyToggledSidebar = false;
 
     private enum ModalMode { NewNotebook, NewSection }
     private ModalMode _activeModalMode = ModalMode.NewNotebook;
@@ -38,14 +46,27 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
         _storageService = new NoteStorageService();
+        _handwritingService = new HandwritingRecognitionService();
+
+        _handwritingTimer = new DispatcherTimer
+        {
+            Interval = TimeSpan.FromMilliseconds(1300)
+        };
+        _handwritingTimer.Tick += async (_, _) =>
+        {
+            _handwritingTimer.Stop();
+            await ConvertPendingHandwritingAsync();
+        };
+
+        ColorWheelControl.ColorSelected += ColorWheelControl_ColorSelected;
 
         ConfigureInkingDefaults();
         LoadInitialNotebooks();
+        RestoreCurrentToolMode();
     }
 
     private void ConfigureInkingDefaults()
     {
-        // Enable hardware stylus pressure sensitivity & curve smoothing for Lenovo Yoga Pen
         MainInkCanvas.DefaultDrawingAttributes = new DrawingAttributes
         {
             Color = _currentPenColor,
@@ -56,20 +77,66 @@ public partial class MainWindow : Window
             StylusTip = StylusTip.Ellipse
         };
 
-        // Listen for Lenovo Stylus inverted eraser tip
+        // Listen for Lenovo Stylus inverted eraser tip and barrel button
         MainInkCanvas.StylusDown += MainInkCanvas_StylusDown;
         MainInkCanvas.StylusButtonDown += MainInkCanvas_StylusButtonDown;
         MainInkCanvas.StylusButtonUp += MainInkCanvas_StylusButtonUp;
 
-        // Default tool is Type mode (OneNote behavior)
         MainInkCanvas.EditingMode = InkCanvasEditingMode.None;
     }
+
+    #region Responsive Layout Handling
+
+    private void Window_SizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        if (SidebarColDef == null || PageHeaderPanel == null) return;
+
+        // Auto-collapse sidebar on narrow/portrait Lenovo Yoga screens unless user explicitly toggled it
+        if (!_userManuallyToggledSidebar)
+        {
+            bool shouldShow = ActualWidth >= 860;
+            if (shouldShow != _isSidebarVisible)
+            {
+                _isSidebarVisible = shouldShow;
+                ApplySidebarVisibility();
+            }
+        }
+
+        // Keep page title header cleanly sized to the available canvas viewport
+        double sidebarWidth = _isSidebarVisible ? SidebarColDef.Width.Value : 0;
+        double availableWidth = Math.Max(320, ActualWidth - sidebarWidth - 110);
+        PageHeaderPanel.Width = Math.Min(900, availableWidth);
+    }
+
+    private void ApplySidebarVisibility()
+    {
+        if (_isSidebarVisible)
+        {
+            SidebarColDef.Width = new GridLength(290);
+            SidebarPanel.Visibility = Visibility.Visible;
+            SidebarSplitter.Visibility = Visibility.Visible;
+        }
+        else
+        {
+            SidebarColDef.Width = new GridLength(0);
+            SidebarPanel.Visibility = Visibility.Collapsed;
+            SidebarSplitter.Visibility = Visibility.Collapsed;
+        }
+    }
+
+    private void BtnToggleSidebar_Click(object sender, RoutedEventArgs e)
+    {
+        _userManuallyToggledSidebar = true;
+        _isSidebarVisible = !_isSidebarVisible;
+        ApplySidebarVisibility();
+    }
+
+    #endregion
 
     #region Stylus Hardware Handling (Lenovo Yoga Active Pen)
 
     private void MainInkCanvas_StylusDown(object sender, StylusDownEventArgs e)
     {
-        // When stylus is inverted (eraser tip), switch to erase mode
         if (e.StylusDevice != null && e.StylusDevice.Inverted)
         {
             MainInkCanvas.EditingMode = InkCanvasEditingMode.EraseByStroke;
@@ -78,8 +145,8 @@ public partial class MainWindow : Window
 
     private void MainInkCanvas_StylusButtonDown(object sender, StylusButtonEventArgs e)
     {
-        // Stylus barrel button (often used as eraser or lasso select in OneNote)
-        if (e.StylusButton.Guid == StylusPointProperties.NormalPressure.Id || e.StylusButton.Name.Contains("Barrel", StringComparison.OrdinalIgnoreCase))
+        if (e.StylusButton.Guid == StylusPointProperties.NormalPressure.Id ||
+            e.StylusButton.Name.Contains("Barrel", StringComparison.OrdinalIgnoreCase))
         {
             MainInkCanvas.EditingMode = InkCanvasEditingMode.EraseByStroke;
         }
@@ -158,15 +225,16 @@ public partial class MainWindow : Window
 
     private void LoadPageContent(string pageId, string fallbackTitle)
     {
+        _handwritingTimer.Stop();
+        _pendingHandwritingStrokes.Clear();
+
         _currentPageData = _storageService.LoadPage(pageId, fallbackTitle);
 
         TxtPageTitle.Text = _currentPageData.Title;
         TxtPageTimestamp.Text = _currentPageData.CreatedAt.ToString("dddd, MMMM dd, yyyy  h:mm tt");
 
-        // Set paper background
         SetPaperStyle(_currentPageData.PaperStyle, updateDropdown: true);
 
-        // Load ink strokes
         _isApplyingHistory = true;
         MainInkCanvas.Strokes.Clear();
         var strokes = NoteStorageService.DeserializeStrokes(_currentPageData.StrokeData);
@@ -179,7 +247,6 @@ public partial class MainWindow : Window
         RecordInkState();
         _isApplyingHistory = false;
 
-        // Load floating text boxes
         MainInkCanvas.Children.Clear();
         if (_currentPageData.TextBoxes != null)
         {
@@ -194,14 +261,10 @@ public partial class MainWindow : Window
     {
         if (_currentPageData == null || _currentPageItem == null) return;
 
-        // Sync title
         _currentPageData.Title = TxtPageTitle.Text;
         _currentPageItem.Title = TxtPageTitle.Text;
-
-        // Sync strokes
         _currentPageData.StrokeData = NoteStorageService.SerializeStrokes(MainInkCanvas.Strokes);
 
-        // Sync text boxes
         var boxList = new List<NoteTextBox>();
         foreach (UIElement child in MainInkCanvas.Children)
         {
@@ -232,36 +295,37 @@ public partial class MainWindow : Window
 
     private void MainInkCanvas_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
-        // Check if user clicked on an existing floating note
+        // ONLY create floating note bubbles when explicitly in Type mode!
+        // Never create note bubbles while using Pen, Highlighter, Shape, Write->Text, Eraser, or Lasso.
+        if (ToolText.IsChecked != true) return;
+
         var hit = e.OriginalSource as DependencyObject;
         while (hit != null && hit != MainInkCanvas)
         {
-            if (hit is FloatingNoteControl) return; // Clicking an existing note
+            if (hit is FloatingNoteControl) return; // Interacting with an existing note
             hit = VisualTreeHelper.GetParent(hit);
         }
 
-        // Double click anywhere OR single click in Type mode creates a text box
-        if (e.ClickCount >= 2 || ToolText.IsChecked == true)
-        {
-            var pos = e.GetPosition(MainInkCanvas);
-            CreateAndAddNoteAt(pos.X, pos.Y);
-            e.Handled = true;
-        }
+        var pos = e.GetPosition(MainInkCanvas);
+        CreateAndAddNoteAt(pos.X, pos.Y);
+        e.Handled = true;
     }
 
-    private void CreateAndAddNoteAt(double x, double y)
+    private FloatingNoteControl CreateAndAddNoteAt(double x, double y, string initialText = "", bool focus = true)
     {
         var model = new NoteTextBox
         {
             X = Math.Max(10, x),
             Y = Math.Max(10, y),
-            Width = 260,
+            Width = 280,
             Height = 110,
-            Text = string.Empty
+            Text = initialText
         };
 
         var noteCtrl = AddFloatingNoteToCanvas(model);
-        noteCtrl.FocusEditor();
+        if (focus) noteCtrl.FocusEditor();
+        SaveCurrentPage();
+        return noteCtrl;
     }
 
     private FloatingNoteControl AddFloatingNoteToCanvas(NoteTextBox model)
@@ -285,83 +349,189 @@ public partial class MainWindow : Window
         {
             _currentPageItem.Title = TxtPageTitle.Text;
             _currentPageData.Title = TxtPageTitle.Text;
-
-            // Trigger list refresh
             ListPages.Items.Refresh();
         }
     }
 
     #endregion
 
-    #region Inking Tools & Modes
+    #region Inking Tools, Colors, Wheel & Modes
 
     private void ToolButton_Click(object sender, RoutedEventArgs e)
     {
+        // If switching away from Write->Text while strokes are pending, convert them first
+        if (ToolWriteText.IsChecked != true && _pendingHandwritingStrokes.Count > 0)
+        {
+            _handwritingTimer.Stop();
+            _ = ConvertPendingHandwritingAsync();
+        }
+
         RestoreCurrentToolMode();
     }
 
     private void RestoreCurrentToolMode()
     {
-        if (MainInkCanvas == null || ToolText == null || ToolPen == null || ToolHighlighter == null || ToolEraser == null || ToolSelect == null)
+        if (MainInkCanvas == null || ToolText == null || ToolPen == null ||
+            ToolHighlighter == null || ToolEraser == null || ToolSelect == null ||
+            ToolWriteText == null || ToolShape == null)
             return;
+
+        bool isHighlighter = ToolHighlighter.IsChecked == true;
+        bool isWriteMode = ToolWriteText.IsChecked == true;
+
+        // Show Write->Text language controls only in Writing mode
+        if (WriteModeControlsPanel != null)
+            WriteModeControlsPanel.Visibility = isWriteMode ? Visibility.Visible : Visibility.Collapsed;
+
+        // When Highlighter is chosen, remove dark/pen colors and show only bright highlighter colors
+        if (PenColorsPanel != null && HighlighterColorsPanel != null)
+        {
+            PenColorsPanel.Visibility = isHighlighter ? Visibility.Collapsed : Visibility.Visible;
+            HighlighterColorsPanel.Visibility = isHighlighter ? Visibility.Visible : Visibility.Collapsed;
+        }
+
+        var activeColor = isHighlighter ? _currentHighlighterColor : _currentPenColor;
+        UpdateActiveColorIndicators(activeColor);
 
         if (ToolText.IsChecked == true)
         {
             MainInkCanvas.EditingMode = InkCanvasEditingMode.None;
             MainInkCanvas.Cursor = Cursors.IBeam;
+            UpdateStatus("Type Mode — Click anywhere on the canvas to create a floating note");
         }
         else if (ToolPen.IsChecked == true)
         {
             MainInkCanvas.EditingMode = InkCanvasEditingMode.Ink;
             MainInkCanvas.Cursor = Cursors.Pen;
             MainInkCanvas.DefaultDrawingAttributes.IsHighlighter = false;
+            MainInkCanvas.DefaultDrawingAttributes.FitToCurve = true;
             MainInkCanvas.DefaultDrawingAttributes.Color = _currentPenColor;
             MainInkCanvas.DefaultDrawingAttributes.Width = _currentStrokeThickness;
             MainInkCanvas.DefaultDrawingAttributes.Height = _currentStrokeThickness;
             MainInkCanvas.DefaultDrawingAttributes.StylusTip = StylusTip.Ellipse;
+            UpdateStatus("Pen Mode — Smooth pressure-sensitive inking (note bubbles disabled)");
+        }
+        else if (ToolWriteText.IsChecked == true)
+        {
+            MainInkCanvas.EditingMode = InkCanvasEditingMode.Ink;
+            MainInkCanvas.Cursor = Cursors.Pen;
+            MainInkCanvas.DefaultDrawingAttributes.IsHighlighter = false;
+            MainInkCanvas.DefaultDrawingAttributes.FitToCurve = true;
+            MainInkCanvas.DefaultDrawingAttributes.Color = _currentPenColor;
+            MainInkCanvas.DefaultDrawingAttributes.Width = Math.Max(2.5, _currentStrokeThickness);
+            MainInkCanvas.DefaultDrawingAttributes.Height = Math.Max(2.5, _currentStrokeThickness);
+            MainInkCanvas.DefaultDrawingAttributes.StylusTip = StylusTip.Ellipse;
+            var langName = _handwritingLanguage == HandwritingLanguage.Bulgarian ? "Български" : "English";
+            UpdateStatus($"Writing Mode ({langName}) — Write cursive with your pen; pauses automatically convert to text");
+        }
+        else if (ToolShape.IsChecked == true)
+        {
+            MainInkCanvas.EditingMode = InkCanvasEditingMode.Ink;
+            MainInkCanvas.Cursor = Cursors.Cross;
+            MainInkCanvas.DefaultDrawingAttributes.IsHighlighter = false;
+            MainInkCanvas.DefaultDrawingAttributes.FitToCurve = false;
+            MainInkCanvas.DefaultDrawingAttributes.Color = _currentPenColor;
+            MainInkCanvas.DefaultDrawingAttributes.Width = _currentStrokeThickness;
+            MainInkCanvas.DefaultDrawingAttributes.Height = _currentStrokeThickness;
+            MainInkCanvas.DefaultDrawingAttributes.StylusTip = StylusTip.Ellipse;
+            UpdateStatus("Shape Mode — Draw a circle, oval, square, rectangle, triangle, or straight line to snap cleanly");
         }
         else if (ToolHighlighter.IsChecked == true)
         {
             MainInkCanvas.EditingMode = InkCanvasEditingMode.Ink;
             MainInkCanvas.Cursor = Cursors.Pen;
             MainInkCanvas.DefaultDrawingAttributes.IsHighlighter = true;
-            // Semi-transparent color for highlighter
-            var hlColor = Color.FromArgb(120, _currentPenColor.R, _currentPenColor.G, _currentPenColor.B);
-            if (hlColor.R == 15 && hlColor.G == 23 && hlColor.B == 42) // If black, default to yellow
-            {
-                hlColor = Color.FromArgb(120, 250, 204, 21);
-            }
-            MainInkCanvas.DefaultDrawingAttributes.Color = hlColor;
-            MainInkCanvas.DefaultDrawingAttributes.Width = _currentStrokeThickness * 3;
-            MainInkCanvas.DefaultDrawingAttributes.Height = _currentStrokeThickness * 6;
+            MainInkCanvas.DefaultDrawingAttributes.FitToCurve = true;
+            MainInkCanvas.DefaultDrawingAttributes.Color = Color.FromArgb(120, _currentHighlighterColor.R, _currentHighlighterColor.G, _currentHighlighterColor.B);
+            MainInkCanvas.DefaultDrawingAttributes.Width = Math.Max(8, _currentStrokeThickness * 3);
+            MainInkCanvas.DefaultDrawingAttributes.Height = Math.Max(18, _currentStrokeThickness * 6);
             MainInkCanvas.DefaultDrawingAttributes.StylusTip = StylusTip.Rectangle;
+            UpdateStatus("Highlighter Mode — Translucent bright highlight colors");
         }
         else if (ToolEraser.IsChecked == true)
         {
             MainInkCanvas.EditingMode = InkCanvasEditingMode.EraseByStroke;
             MainInkCanvas.Cursor = Cursors.Cross;
+            UpdateStatus("Eraser Mode — Tap or drag across ink strokes to erase");
         }
         else if (ToolSelect.IsChecked == true)
         {
             MainInkCanvas.EditingMode = InkCanvasEditingMode.Select;
             MainInkCanvas.Cursor = Cursors.Arrow;
+            UpdateStatus("Lasso Mode — Circle ink strokes to select, move, or resize");
         }
+    }
+
+    private void UpdateActiveColorIndicators(Color color)
+    {
+        if (ActiveColorDot != null)
+            ActiveColorDot.Fill = new SolidColorBrush(color);
+
+        if (StatusColorText != null)
+            StatusColorText.Text = $"Color: #{color.R:X2}{color.G:X2}{color.B:X2}";
+    }
+
+    private void UpdateStatus(string text)
+    {
+        if (StatusModeText != null)
+            StatusModeText.Text = text;
     }
 
     private void ColorChip_Click(object sender, RoutedEventArgs e)
     {
         if (sender is Button btn && btn.Background is SolidColorBrush brush)
         {
-            _currentPenColor = brush.Color;
+            ApplyChosenColor(brush.Color);
+        }
+    }
 
-            // If user clicked a color, automatically switch to Pen or Highlighter
+    private void BtnColorWheel_Click(object sender, RoutedEventArgs e)
+    {
+        var current = ToolHighlighter.IsChecked == true ? _currentHighlighterColor : _currentPenColor;
+        ColorWheelControl.SetCurrentColor(current);
+        ColorWheelPopup.IsOpen = !ColorWheelPopup.IsOpen;
+    }
+
+    private void ColorWheelControl_ColorSelected(object? sender, Color color)
+    {
+        ApplyChosenColor(color);
+    }
+
+    private void ApplyChosenColor(Color color)
+    {
+        if (ToolHighlighter.IsChecked == true)
+        {
+            _currentHighlighterColor = color;
+        }
+        else
+        {
+            _currentPenColor = color;
+            // If user picked a color while in Type/Eraser/Lasso, switch to Pen automatically
             if (ToolText.IsChecked == true || ToolEraser.IsChecked == true || ToolSelect.IsChecked == true)
             {
                 ToolPen.IsChecked = true;
             }
-
-            RestoreCurrentToolMode();
         }
+
+        RestoreCurrentToolMode();
+    }
+
+    private void ComboWriteLanguage_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (ComboWriteLanguage?.SelectedItem is ComboBoxItem item && item.Tag != null)
+        {
+            if (Enum.TryParse<HandwritingLanguage>(item.Tag.ToString(), out var lang))
+            {
+                _handwritingLanguage = lang;
+                RestoreCurrentToolMode();
+            }
+        }
+    }
+
+    private async void BtnConvertNow_Click(object sender, RoutedEventArgs e)
+    {
+        _handwritingTimer.Stop();
+        await ConvertPendingHandwritingAsync();
     }
 
     private void ComboStrokeThickness_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -413,15 +583,125 @@ public partial class MainWindow : Window
 
     #endregion
 
-    #region Ink Undo / Redo & Editing History
+    #region Ink Events, Shape Recognition & Handwriting-to-Text
 
     private void MainInkCanvas_StrokeCollected(object sender, InkCanvasStrokeCollectedEventArgs e)
     {
-        if (!_isApplyingHistory)
+        if (_isApplyingHistory) return;
+
+        // 1. Writing Mode (Handwriting -> Text in English or Bulgarian)
+        if (ToolWriteText.IsChecked == true)
         {
-            RecordInkState();
-            _redoStack.Clear();
+            _pendingHandwritingStrokes.Add(e.Stroke);
+            _handwritingTimer.Stop();
+            _handwritingTimer.Start();
+            var langName = _handwritingLanguage == HandwritingLanguage.Bulgarian ? "Български" : "English";
+            UpdateStatus($"Writing Mode ({langName}) — Recognizing handwriting...");
+            return;
         }
+
+        // 2. Shape Mode (Paint-style crisp shape snapping)
+        if (ToolShape.IsChecked == true)
+        {
+            var cleanedShape = ShapeRecognizer.TryRecognizeAndCleanShape(e.Stroke);
+            if (cleanedShape != null)
+            {
+                _isApplyingHistory = true;
+                MainInkCanvas.Strokes.Remove(e.Stroke);
+                MainInkCanvas.Strokes.Add(cleanedShape);
+                _isApplyingHistory = false;
+                UpdateStatus("Shape Mode — Snapped to clean geometric shape!");
+            }
+        }
+
+        RecordInkState();
+        _redoStack.Clear();
+    }
+
+    private async Task ConvertPendingHandwritingAsync()
+    {
+        if (_pendingHandwritingStrokes.Count == 0) return;
+
+        var strokesToProcess = _pendingHandwritingStrokes.ToList();
+        _pendingHandwritingStrokes.Clear();
+
+        // Compute bounding box of the handwritten word/phrase so text appears right where user wrote
+        Rect combinedBounds = Rect.Empty;
+        foreach (var s in strokesToProcess)
+        {
+            combinedBounds.Union(s.GetBounds());
+        }
+
+        string recognizedText = string.Empty;
+        try
+        {
+            recognizedText = await _handwritingService.RecognizeStrokesAsync(strokesToProcess, _handwritingLanguage);
+        }
+        catch (Exception ex)
+        {
+            UpdateStatus($"Handwriting recognition error: {ex.Message}");
+            return;
+        }
+
+        // Remove the raw temporary handwriting strokes from canvas
+        _isApplyingHistory = true;
+        foreach (var s in strokesToProcess)
+        {
+            MainInkCanvas.Strokes.Remove(s);
+        }
+        _isApplyingHistory = false;
+
+        var langName = _handwritingLanguage == HandwritingLanguage.Bulgarian ? "Български" : "English";
+
+        if (string.IsNullOrWhiteSpace(recognizedText))
+        {
+            UpdateStatus($"Writing Mode ({langName}) — Could not recognize text, try writing slightly larger");
+            return;
+        }
+
+        // Check if user is writing right next to or inside an existing floating note
+        FloatingNoteControl? targetNote = FindNearbyNote(combinedBounds);
+        if (targetNote != null)
+        {
+            var existing = targetNote.NoteTextBoxControl.Text;
+            var separator = string.IsNullOrWhiteSpace(existing) || existing.EndsWith(' ') || existing.EndsWith('\n')
+                ? ""
+                : " ";
+            targetNote.NoteTextBoxControl.Text = existing + separator + recognizedText;
+        }
+        else
+        {
+            double x = combinedBounds.IsEmpty ? 60 : Math.Max(10, combinedBounds.X);
+            double y = combinedBounds.IsEmpty ? 60 : Math.Max(10, combinedBounds.Y);
+            CreateAndAddNoteAt(x, y, recognizedText, focus: false);
+        }
+
+        SaveCurrentPage();
+        UpdateStatus($"Recognized ({langName}): \"{recognizedText}\"");
+    }
+
+    private FloatingNoteControl? FindNearbyNote(Rect strokeBounds)
+    {
+        if (strokeBounds.IsEmpty) return null;
+
+        // Expand search zone around existing note boxes so writing on the same line appends cleanly
+        foreach (UIElement child in MainInkCanvas.Children)
+        {
+            if (child is FloatingNoteControl note)
+            {
+                double nx = InkCanvas.GetLeft(note);
+                double ny = InkCanvas.GetTop(note);
+                if (double.IsNaN(nx)) nx = 0;
+                if (double.IsNaN(ny)) ny = 0;
+
+                var expandedRect = new Rect(nx - 30, ny - 25, note.Width + 140, note.Height + 60);
+                if (expandedRect.IntersectsWith(strokeBounds))
+                {
+                    return note;
+                }
+            }
+        }
+        return null;
     }
 
     private void MainInkCanvas_StrokeErased(object sender, RoutedEventArgs e)
@@ -483,6 +763,8 @@ public partial class MainWindow : Window
         var result = MessageBox.Show(this, "Are you sure you want to clear all ink on this page?", "Clear Canvas", MessageBoxButton.YesNo, MessageBoxImage.Question);
         if (result == MessageBoxResult.Yes)
         {
+            _handwritingTimer.Stop();
+            _pendingHandwritingStrokes.Clear();
             MainInkCanvas.Strokes.Clear();
             RecordInkState();
         }
@@ -632,12 +914,6 @@ public partial class MainWindow : Window
     private void ModalCancel_Click(object sender, RoutedEventArgs e)
     {
         ModalOverlay.Visibility = Visibility.Collapsed;
-    }
-
-    private void BtnToggleSidebar_Click(object sender, RoutedEventArgs e)
-    {
-        _isSidebarVisible = !_isSidebarVisible;
-        SidebarColDef.Width = _isSidebarVisible ? new GridLength(310) : new GridLength(0);
     }
 
     protected override void OnClosing(System.ComponentModel.CancelEventArgs e)
