@@ -1,10 +1,13 @@
 using System.IO;
+using System.Text;
 using System.Text.Json;
-using System.Windows.Ink;
-using System.Windows.Media.Imaging;
-using System.Windows.Media;
 using System.Windows;
+using System.Windows.Documents;
+using System.Windows.Ink;
+using System.Windows.Media;
+using System.Windows.Media.Imaging;
 using YogaNotes.Models;
+using Section = YogaNotes.Models.Section;
 
 namespace YogaNotes.Services;
 
@@ -22,7 +25,6 @@ public class NoteStorageService
 
     public NoteStorageService()
     {
-        // Store notes in User Documents/YogaNotesData for easy access and backup
         var myDocuments = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
         _baseDirectory = Path.Combine(myDocuments, "YogaNotesData");
         _pagesDirectory = Path.Combine(_baseDirectory, "Pages");
@@ -51,7 +53,6 @@ public class NoteStorageService
             System.Diagnostics.Debug.WriteLine($"Failed to load notebooks: {ex.Message}");
         }
 
-        // Create default starter notebook
         return CreateInitialData();
     }
 
@@ -79,6 +80,24 @@ public class NoteStorageService
                 var data = JsonSerializer.Deserialize<PageData>(json, JsonOptions);
                 if (data != null)
                 {
+                    // One-time migration from legacy floating note bubbles to unified Word document
+                    if (string.IsNullOrWhiteSpace(data.DocumentXaml) &&
+                        data.LegacyTextBoxes != null &&
+                        data.LegacyTextBoxes.Count > 0)
+                    {
+                        var mergedText = string.Join(
+                            "\n\n",
+                            data.LegacyTextBoxes
+                                .OrderBy(b => b.Y)
+                                .ThenBy(b => b.X)
+                                .Select(b => b.Text?.Trim())
+                                .Where(t => !string.IsNullOrEmpty(t)));
+
+                        data.DocumentPlainText = mergedText;
+                        data.LegacyTextBoxes = null;
+                        SavePage(data);
+                    }
+
                     return data;
                 }
             }
@@ -94,7 +113,7 @@ public class NoteStorageService
             Title = fallbackTitle,
             CreatedAt = DateTime.Now,
             UpdatedAt = DateTime.Now,
-            PaperStyle = PaperStyle.Ruled
+            PaperStyle = PaperStyle.Blank
         };
     }
 
@@ -103,6 +122,7 @@ public class NoteStorageService
         try
         {
             pageData.UpdatedAt = DateTime.Now;
+            pageData.LegacyTextBoxes = null; // Never re-write legacy bubble format
             var filePath = GetPageFilePath(pageData.Id);
             var json = JsonSerializer.Serialize(pageData, JsonOptions);
             File.WriteAllText(filePath, json);
@@ -131,6 +151,94 @@ public class NoteStorageService
         return Path.Combine(_pagesDirectory, $"{pageId}.json");
     }
 
+    /// <summary>
+    /// Creates a clean FlowDocument configured with the central Times New Roman 12pt typography.
+    /// </summary>
+    public static FlowDocument CreateStyledDocument(string initialPlainText = "")
+    {
+        var doc = new FlowDocument
+        {
+            FontFamily = DocumentTypography.DefaultFontFamily,
+            FontSize = DocumentTypography.DefaultFontSizeDip,
+            LineHeight = DocumentTypography.DefaultLineHeight,
+            Foreground = new SolidColorBrush(Color.FromRgb(15, 23, 42)),
+            PagePadding = new Thickness(0)
+        };
+
+        if (!string.IsNullOrEmpty(initialPlainText))
+        {
+            var lines = initialPlainText.Replace("\r\n", "\n").Split('\n');
+            foreach (var line in lines)
+            {
+                var p = new Paragraph(new Run(line))
+                {
+                    FontFamily = DocumentTypography.DefaultFontFamily,
+                    FontSize = DocumentTypography.DefaultFontSizeDip,
+                    LineHeight = DocumentTypography.DefaultLineHeight,
+                    Margin = new Thickness(0, 0, 0, 6)
+                };
+                doc.Blocks.Add(p);
+            }
+        }
+        else
+        {
+            doc.Blocks.Add(new Paragraph
+            {
+                FontFamily = DocumentTypography.DefaultFontFamily,
+                FontSize = DocumentTypography.DefaultFontSizeDip,
+                LineHeight = DocumentTypography.DefaultLineHeight,
+                Margin = new Thickness(0, 0, 0, 6)
+            });
+        }
+
+        return doc;
+    }
+
+    public static (string Xaml, string PlainText) SerializeFlowDocument(FlowDocument document)
+    {
+        var range = new TextRange(document.ContentStart, document.ContentEnd);
+        string plainText = range.Text.TrimEnd('\r', '\n');
+
+        using var ms = new MemoryStream();
+        range.Save(ms, DataFormats.Xaml);
+        string xaml = Encoding.UTF8.GetString(ms.ToArray());
+
+        return (xaml, plainText);
+    }
+
+    public static FlowDocument DeserializeFlowDocument(string xaml, string plainTextFallback)
+    {
+        var doc = CreateStyledDocument();
+
+        if (!string.IsNullOrWhiteSpace(xaml))
+        {
+            try
+            {
+                var bytes = Encoding.UTF8.GetBytes(xaml);
+                using var ms = new MemoryStream(bytes);
+                var range = new TextRange(doc.ContentStart, doc.ContentEnd);
+                range.Load(ms, DataFormats.Xaml);
+
+                // Ensure document-level defaults remain Times New Roman
+                doc.FontFamily = DocumentTypography.DefaultFontFamily;
+                doc.FontSize = DocumentTypography.DefaultFontSizeDip;
+                doc.LineHeight = DocumentTypography.DefaultLineHeight;
+                return doc;
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Failed to deserialize XAML document, falling back to plain text: {ex.Message}");
+            }
+        }
+
+        if (!string.IsNullOrEmpty(plainTextFallback))
+        {
+            return CreateStyledDocument(plainTextFallback);
+        }
+
+        return doc;
+    }
+
     public static string SerializeStrokes(StrokeCollection strokes)
     {
         if (strokes == null || strokes.Count == 0) return string.Empty;
@@ -156,8 +264,8 @@ public class NoteStorageService
 
     public static void ExportToPng(FrameworkElement visual, string filePath)
     {
-        var width = (int)Math.Max(visual.ActualWidth, 1200);
-        var height = (int)Math.Max(visual.ActualHeight, 1600);
+        var width = (int)Math.Max(visual.ActualWidth, 850);
+        var height = (int)Math.Max(visual.ActualHeight, 1120);
 
         var rtb = new RenderTargetBitmap(width, height, 96, 96, PixelFormats.Pbgra32);
         rtb.Render(visual);
@@ -174,7 +282,7 @@ public class NoteStorageService
         var welcomePage = new PageItem
         {
             Id = Guid.NewGuid().ToString(),
-            Title = "Welcome to YogaNotes!",
+            Title = "Welcome to YogaNotes",
             CreatedAt = DateTime.Now,
             UpdatedAt = DateTime.Now
         };
@@ -208,30 +316,20 @@ public class NoteStorageService
         var notebooks = new List<Notebook> { defaultNotebook };
         SaveNotebooks(notebooks);
 
-        // Pre-populate welcome page content with nice instructions
+        string welcomeText =
+            "Welcome to YogaNotes for Lenovo Yoga.\n\n" +
+            "• Word-Style Document: Click anywhere on this page to type in Times New Roman with bold, italic, underline, alignment, and lists.\n" +
+            "• Smart Drawing & Shape Assist: Switch to Draw mode to sketch with pressure sensitivity. Rough circles, rectangles, squares, triangles, straight lines, and arrows automatically snap into crisp shapes (press Ctrl+Z once to revert to your raw stroke).\n" +
+            "• Inline Handwriting-to-Text: Use Write→Text in Draw mode to write in cursive English or Bulgarian — your handwriting converts directly into editable Times New Roman text inside this document.";
+
         var initialWelcomeData = new PageData
         {
             Id = welcomePage.Id,
             Title = welcomePage.Title,
             CreatedAt = welcomePage.CreatedAt,
             UpdatedAt = DateTime.Now,
-            PaperStyle = PaperStyle.Ruled,
-            TextBoxes = new List<NoteTextBox>
-            {
-                new()
-                {
-                    X = 60,
-                    Y = 60,
-                    Width = 650,
-                    Height = 220,
-                    Text = "Welcome to YogaNotes for Lenovo Yoga! ✍️\n\n" +
-                           "• Freeform Canvas: Select the 'Text' tool or double click anywhere on the page to type notes.\n" +
-                           "• Stylus Ready: Switch to 'Pen' or 'Highlighter' to sketch with true pressure sensitivity and palm rejection.\n" +
-                           "• Lenovo Pen Support: Use your pen's eraser tip or hold the eraser button to erase ink seamlessly.\n" +
-                           "• Paper Backgrounds: Easily switch between Ruled (lined), Grid, and Blank paper.\n" +
-                           "• Hierarchy: Organize by Notebooks, Sections, and Pages on the left sidebar just like Microsoft OneNote."
-                }
-            }
+            PaperStyle = PaperStyle.Blank,
+            DocumentPlainText = welcomeText
         };
 
         SavePage(initialWelcomeData);

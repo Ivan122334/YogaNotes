@@ -1,4 +1,5 @@
 using System.Numerics;
+using System.Windows;
 using System.Windows.Ink;
 using Windows.UI.Input.Inking;
 
@@ -10,6 +11,10 @@ public enum HandwritingLanguage
     Bulgarian
 }
 
+/// <summary>
+/// Wraps Windows native InkRecognizerContainer for offline cursive handwriting recognition
+/// in English and Bulgarian (Cyrillic), preserving line breaks across multi-line notes.
+/// </summary>
 public class HandwritingRecognitionService
 {
     private readonly InkRecognizerContainer _recognizerContainer;
@@ -43,26 +48,48 @@ public class HandwritingRecognitionService
         }
     }
 
-    public async Task<string> RecognizeStrokesAsync(IEnumerable<Stroke> wpfStrokes, HandwritingLanguage language)
+    /// <summary>
+    /// Groups strokes into separate horizontal lines and recognizes each line in order,
+    /// preserving line breaks when inserting into the Word-style document.
+    /// </summary>
+    public async Task<List<string>> RecognizeLinesAsync(IEnumerable<Stroke> wpfStrokes, HandwritingLanguage language)
     {
-        var strokeList = wpfStrokes.ToList();
-        if (strokeList.Count == 0) return string.Empty;
+        var strokeList = wpfStrokes.Where(s => s.StylusPoints.Count > 0).ToList();
+        if (strokeList.Count == 0) return new List<string>();
 
         var targetRecognizer = language == HandwritingLanguage.Bulgarian
             ? (_bulgarianRecognizer ?? _englishRecognizer)
             : (_englishRecognizer ?? _bulgarianRecognizer);
 
-        if (targetRecognizer == null) return string.Empty;
+        if (targetRecognizer == null)
+        {
+            throw new InvalidOperationException("No Windows handwriting recognizer is installed for the selected language.");
+        }
 
         _recognizerContainer.SetDefaultRecognizer(targetRecognizer);
 
+        var lineGroups = GroupStrokesIntoLines(strokeList);
+        var recognizedLines = new List<string>();
+
+        foreach (var lineStrokes in lineGroups)
+        {
+            var text = await RecognizeGroupAsync(lineStrokes);
+            if (!string.IsNullOrWhiteSpace(text))
+            {
+                recognizedLines.Add(text);
+            }
+        }
+
+        return recognizedLines;
+    }
+
+    private async Task<string> RecognizeGroupAsync(List<Stroke> strokes)
+    {
         var winrtContainer = new InkStrokeContainer();
         var builder = new InkStrokeBuilder();
 
-        foreach (var wpfStroke in strokeList)
+        foreach (var wpfStroke in strokes)
         {
-            if (wpfStroke.StylusPoints.Count == 0) continue;
-
             var inkPoints = new List<InkPoint>(wpfStroke.StylusPoints.Count);
             foreach (var sp in wpfStroke.StylusPoints)
             {
@@ -90,5 +117,59 @@ public class HandwritingRecognitionService
         }
 
         return string.Join(" ", words);
+    }
+
+    /// <summary>
+    /// Clusters strokes into top-to-bottom horizontal writing lines using vertical overlap
+    /// and median stroke height so separate lines produce separate paragraphs.
+    /// </summary>
+    private static List<List<Stroke>> GroupStrokesIntoLines(List<Stroke> strokes)
+    {
+        var items = strokes
+            .Select(s => (Stroke: s, Bounds: s.GetBounds()))
+            .OrderBy(x => x.Bounds.Top + x.Bounds.Height / 2.0)
+            .ToList();
+
+        // Compute a sensible vertical line-break threshold from stroke heights
+        var heights = items.Select(x => x.Bounds.Height).Where(h => h > 4).OrderBy(h => h).ToList();
+        double medianHeight = heights.Count > 0 ? heights[heights.Count / 2] : 24.0;
+        double lineGapThreshold = Math.Max(medianHeight * 0.85, 22.0);
+
+        var lines = new List<(Rect Band, List<Stroke> Strokes)>();
+
+        foreach (var item in items)
+        {
+            bool placed = false;
+            double itemMidY = item.Bounds.Top + item.Bounds.Height / 2.0;
+
+            for (int i = 0; i < lines.Count; i++)
+            {
+                var band = lines[i].Band;
+                // Check if stroke overlaps vertically with the band OR sits close to its vertical center
+                bool overlaps = item.Bounds.Top <= band.Bottom + lineGapThreshold * 0.45 &&
+                                item.Bounds.Bottom >= band.Top - lineGapThreshold * 0.45;
+                bool nearCenter = Math.Abs(itemMidY - (band.Top + band.Height / 2.0)) <= lineGapThreshold;
+
+                if (overlaps || nearCenter)
+                {
+                    var updated = band;
+                    updated.Union(item.Bounds);
+                    lines[i] = (updated, lines[i].Strokes);
+                    lines[i].Strokes.Add(item.Stroke);
+                    placed = true;
+                    break;
+                }
+            }
+
+            if (!placed)
+            {
+                lines.Add((item.Bounds, new List<Stroke> { item.Stroke }));
+            }
+        }
+
+        return lines
+            .OrderBy(l => l.Band.Top)
+            .Select(l => l.Strokes.OrderBy(s => s.GetBounds().Left).ToList())
+            .ToList();
     }
 }

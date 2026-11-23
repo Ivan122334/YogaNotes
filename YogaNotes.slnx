@@ -1,3 +1,4 @@
 <Solution>
   <Project Path="YogaNotes.csproj" />
+  <Project Path="YogaNotes.Tests/YogaNotes.Tests.csproj" />
 </Solution>

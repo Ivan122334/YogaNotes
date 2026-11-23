@@ -3,42 +3,77 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
-        xmlns:local="clr-namespace:YogaNotes"
         xmlns:controls="clr-namespace:YogaNotes.Controls"
         mc:Ignorable="d"
-        Title="YogaNotes — OneNote for Lenovo Yoga" 
-        Height="850" Width="1350"
-        MinHeight="500" MinWidth="620"
+        Title="YogaNotes — Document &amp; Ink for Lenovo Yoga"
+        Height="860" Width="1360"
+        MinHeight="500" MinWidth="640"
         WindowStartupLocation="CenterScreen"
         SizeChanged="Window_SizeChanged"
-        Background="#F1F5F9"
+        PreviewKeyDown="Window_PreviewKeyDown"
+        Background="#E2E8F0"
         FontFamily="Segoe UI, Segoe UI Variable Display, Arial">
 
     <Window.Resources>
-        <!-- OneNote Purple Brand Color -->
         <SolidColorBrush x:Key="OneNotePurple" Color="#7719AA"/>
-        <SolidColorBrush x:Key="OneNotePurpleHover" Color="#60138B"/>
         <SolidColorBrush x:Key="OneNotePurpleLight" Color="#F3E8FF"/>
 
-        <!-- Touch Tool Button Style -->
+        <!-- Primary Mode Segmented RadioButton -->
+        <Style x:Key="ModeSwitchStyle" TargetType="RadioButton">
+            <Setter Property="Background" Value="#F1F5F9"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="BorderBrush" Value="#CBD5E1"/>
+            <Setter Property="Padding" Value="12,5"/>
+            <Setter Property="Margin" Value="2,2"/>
+            <Setter Property="Height" Value="36"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Foreground" Value="#334155"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="RadioButton">
+                        <Border x:Name="Border"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="6"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Border" Property="Background" Value="#E2E8F0"/>
+                            </Trigger>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="Border" Property="Background" Value="{StaticResource OneNotePurple}"/>
+                                <Setter TargetName="Border" Property="BorderBrush" Value="{StaticResource OneNotePurple}"/>
+                                <Setter Property="Foreground" Value="White"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Sub-tool RadioButton Style -->
         <Style x:Key="ToolButtonStyle" TargetType="RadioButton">
             <Setter Property="Background" Value="Transparent"/>
             <Setter Property="BorderThickness" Value="1"/>
             <Setter Property="BorderBrush" Value="Transparent"/>
-            <Setter Property="Padding" Value="9,5"/>
+            <Setter Property="Padding" Value="9,4"/>
             <Setter Property="Margin" Value="2,2"/>
-            <Setter Property="Height" Value="38"/>
-            <Setter Property="MinWidth" Value="38"/>
+            <Setter Property="Height" Value="34"/>
+            <Setter Property="MinWidth" Value="34"/>
             <Setter Property="Cursor" Value="Hand"/>
             <Setter Property="Foreground" Value="#334155"/>
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="RadioButton">
-                        <Border x:Name="Border" 
-                                Background="{TemplateBinding Background}" 
-                                BorderBrush="{TemplateBinding BorderBrush}" 
-                                BorderThickness="{TemplateBinding BorderThickness}" 
-                                CornerRadius="6" 
+                        <Border x:Name="Border"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="6"
                                 Padding="{TemplateBinding Padding}">
                             <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
                         </Border>
@@ -57,24 +92,61 @@
             </Setter>
         </Style>
 
-        <!-- Standard Button Style -->
+        <!-- ToggleButton Style (Formatting & Shape Assist) -->
+        <Style x:Key="ToggleToolStyle" TargetType="ToggleButton">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="BorderBrush" Value="#E2E8F0"/>
+            <Setter Property="Padding" Value="8,4"/>
+            <Setter Property="Margin" Value="2,2"/>
+            <Setter Property="Height" Value="34"/>
+            <Setter Property="MinWidth" Value="34"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Foreground" Value="#334155"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ToggleButton">
+                        <Border x:Name="Border"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="6"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Border" Property="Background" Value="#E2E8F0"/>
+                            </Trigger>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="Border" Property="Background" Value="{StaticResource OneNotePurpleLight}"/>
+                                <Setter TargetName="Border" Property="BorderBrush" Value="{StaticResource OneNotePurple}"/>
+                                <Setter Property="Foreground" Value="{StaticResource OneNotePurple}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Standard Flat Button -->
         <Style x:Key="FlatButtonStyle" TargetType="Button">
             <Setter Property="Background" Value="Transparent"/>
             <Setter Property="BorderThickness" Value="1"/>
             <Setter Property="BorderBrush" Value="#E2E8F0"/>
-            <Setter Property="Padding" Value="9,5"/>
+            <Setter Property="Padding" Value="8,4"/>
             <Setter Property="Margin" Value="2,2"/>
-            <Setter Property="Height" Value="38"/>
+            <Setter Property="Height" Value="34"/>
             <Setter Property="Cursor" Value="Hand"/>
             <Setter Property="Foreground" Value="#334155"/>
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="Button">
-                        <Border x:Name="Border" 
-                                Background="{TemplateBinding Background}" 
-                                BorderBrush="{TemplateBinding BorderBrush}" 
-                                BorderThickness="{TemplateBinding BorderThickness}" 
-                                CornerRadius="6" 
+                        <Border x:Name="Border"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="6"
                                 Padding="{TemplateBinding Padding}">
                             <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
                         </Border>
@@ -91,7 +163,7 @@
             </Setter>
         </Style>
 
-        <!-- Color Circle Button Style -->
+        <!-- Color Chip Style -->
         <Style x:Key="ColorChipStyle" TargetType="Button">
             <Setter Property="Width" Value="24"/>
             <Setter Property="Height" Value="24"/>
@@ -117,19 +189,16 @@
 
     <Grid>
         <Grid.RowDefinitions>
-            <!-- Responsive Top Ribbon Toolbar -->
             <RowDefinition Height="Auto"/>
-            <!-- Main Content Area (Sidebar + Canvas) -->
             <RowDefinition Height="*"/>
-            <!-- Status Bar -->
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
-        <!-- ================= RESPONSIVE TOP TOOLBAR ================= -->
-        <Border Grid.Row="0" Background="#FFFFFF" BorderBrush="#E2E8F0" BorderThickness="0,0,0,1" Padding="10,5" SnapsToDevicePixels="True">
+        <!-- ================= RESPONSIVE TOP RIBBON TOOLBAR ================= -->
+        <Border Grid.Row="0" Background="#FFFFFF" BorderBrush="#E2E8F0" BorderThickness="0,0,0,1" Padding="10,6" SnapsToDevicePixels="True">
             <WrapPanel Orientation="Horizontal" VerticalAlignment="Center">
 
-                <!-- App Logo & Navigation Toggle -->
+                <!-- Brand & Sidebar Toggle -->
                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,8,0">
                     <Button x:Name="BtnToggleSidebar" Style="{StaticResource FlatButtonStyle}" Width="36" Height="36" Padding="0" Click="BtnToggleSidebar_Click" ToolTip="Toggle Navigation Sidebar">
                         <TextBlock Text="☰" FontSize="15" FontWeight="Bold" Foreground="{StaticResource OneNotePurple}"/>
@@ -145,75 +214,115 @@
                     <Rectangle Width="1" Height="24" Fill="#E2E8F0" Margin="4,0"/>
                 </StackPanel>
 
-                <!-- Mode Selector Group -->
-                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,6,0">
-                    <RadioButton x:Name="ToolText" GroupName="ToolGroup" Style="{StaticResource ToolButtonStyle}" Click="ToolButton_Click" IsChecked="True" ToolTip="Type Anywhere (Click canvas to create a note box)">
-                        <StackPanel Orientation="Horizontal">
-                            <TextBlock Text="🔤" FontSize="13" Margin="0,0,4,0" VerticalAlignment="Center"/>
-                            <TextBlock Text="Type" FontWeight="SemiBold" FontSize="12.5" VerticalAlignment="Center"/>
-                        </StackPanel>
+                <!-- Primary Mode Toggle: Type vs Draw -->
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,8,0">
+                    <RadioButton x:Name="ModeType" GroupName="PrimaryMode" Style="{StaticResource ModeSwitchStyle}" IsChecked="True" Click="PrimaryMode_Click" ToolTip="Word-style Document Typing Mode">
+                        <TextBlock Text="🔤 Type" FontSize="12.5"/>
                     </RadioButton>
-
-                    <RadioButton x:Name="ToolPen" GroupName="ToolGroup" Style="{StaticResource ToolButtonStyle}" Click="ToolButton_Click" ToolTip="Ballpoint Pen (Pressure sensitive — no note bubbles)">
-                        <StackPanel Orientation="Horizontal">
-                            <TextBlock Text="✏️" FontSize="13" Margin="0,0,4,0" VerticalAlignment="Center"/>
-                            <TextBlock Text="Pen" FontWeight="SemiBold" FontSize="12.5" VerticalAlignment="Center"/>
-                        </StackPanel>
+                    <RadioButton x:Name="ModeDraw" GroupName="PrimaryMode" Style="{StaticResource ModeSwitchStyle}" Click="PrimaryMode_Click" ToolTip="Pen, Shape Assist, Highlighter &amp; Handwriting-to-Text Mode">
+                        <TextBlock Text="✏️ Draw" FontSize="12.5"/>
                     </RadioButton>
-
-                    <RadioButton x:Name="ToolWriteText" GroupName="ToolGroup" Style="{StaticResource ToolButtonStyle}" Click="ToolButton_Click" ToolTip="Writing Mode — Recognizes cursive English or Bulgarian handwriting as text">
-                        <StackPanel Orientation="Horizontal">
-                            <TextBlock Text="✍️" FontSize="13" Margin="0,0,4,0" VerticalAlignment="Center"/>
-                            <TextBlock Text="Write→Text" FontWeight="SemiBold" FontSize="12.5" VerticalAlignment="Center"/>
-                        </StackPanel>
-                    </RadioButton>
-
-                    <RadioButton x:Name="ToolShape" GroupName="ToolGroup" Style="{StaticResource ToolButtonStyle}" Click="ToolButton_Click" ToolTip="Shape Mode — Rough circles, rectangles, triangles, and lines snap cleanly like Paint">
-                        <StackPanel Orientation="Horizontal">
-                            <TextBlock Text="🔷" FontSize="13" Margin="0,0,4,0" VerticalAlignment="Center"/>
-                            <TextBlock Text="Shape" FontWeight="SemiBold" FontSize="12.5" VerticalAlignment="Center"/>
-                        </StackPanel>
-                    </RadioButton>
-
-                    <RadioButton x:Name="ToolHighlighter" GroupName="ToolGroup" Style="{StaticResource ToolButtonStyle}" Click="ToolButton_Click" ToolTip="Highlighter (Translucent bright colors only)">
-                        <StackPanel Orientation="Horizontal">
-                            <TextBlock Text="🖍️" FontSize="13" Margin="0,0,4,0" VerticalAlignment="Center"/>
-                            <TextBlock Text="Highlight" FontWeight="SemiBold" FontSize="12.5" VerticalAlignment="Center"/>
-                        </StackPanel>
-                    </RadioButton>
-
-                    <RadioButton x:Name="ToolEraser" GroupName="ToolGroup" Style="{StaticResource ToolButtonStyle}" Click="ToolButton_Click" ToolTip="Eraser (or flip your Lenovo pen around)">
-                        <StackPanel Orientation="Horizontal">
-                            <TextBlock Text="🧹" FontSize="13" Margin="0,0,4,0" VerticalAlignment="Center"/>
-                            <TextBlock Text="Eraser" FontWeight="SemiBold" FontSize="12.5" VerticalAlignment="Center"/>
-                        </StackPanel>
-                    </RadioButton>
-
-                    <RadioButton x:Name="ToolSelect" GroupName="ToolGroup" Style="{StaticResource ToolButtonStyle}" Click="ToolButton_Click" ToolTip="Lasso Select &amp; Move">
-                        <StackPanel Orientation="Horizontal">
-                            <TextBlock Text="⬚" FontSize="13" Margin="0,0,4,0" VerticalAlignment="Center"/>
-                            <TextBlock Text="Lasso" FontWeight="SemiBold" FontSize="12.5" VerticalAlignment="Center"/>
-                        </StackPanel>
-                    </RadioButton>
+                    <Rectangle Width="1" Height="24" Fill="#E2E8F0" Margin="6,0,2,0"/>
                 </StackPanel>
 
-                <!-- Writing Mode Language Selector (Visible when Write->Text is active) -->
-                <StackPanel x:Name="WriteModeControlsPanel" Orientation="Horizontal" VerticalAlignment="Center" Visibility="Collapsed" Margin="0,0,6,0">
-                    <Rectangle Width="1" Height="24" Fill="#E2E8F0" Margin="4,0,8,0"/>
-                    <ComboBox x:Name="ComboWriteLanguage" Width="118" Height="34" VerticalContentAlignment="Center" SelectionChanged="ComboWriteLanguage_SelectionChanged" ToolTip="Handwriting Recognition Language">
-                        <ComboBoxItem Content="🇬🇧 English" Tag="English" IsSelected="True"/>
-                        <ComboBoxItem Content="🇧🇬 Български" Tag="Bulgarian"/>
+                <!-- ========= TYPE MODE FORMATTING TOOLBAR ========= -->
+                <WrapPanel x:Name="TypeToolbarPanel" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,6,0">
+                    <!-- Font Family Indicator -->
+                    <Border Background="#F8FAFC" BorderBrush="#E2E8F0" BorderThickness="1" CornerRadius="6" Padding="8,4" Margin="2,2" Height="34" ToolTip="Document Font">
+                        <TextBlock Text="Times New Roman" FontFamily="Times New Roman" FontSize="13" Foreground="#334155" VerticalAlignment="Center"/>
+                    </Border>
+
+                    <!-- Font Size Picker -->
+                    <ComboBox x:Name="ComboFontSize" Width="74" Height="34" Margin="2,2" VerticalContentAlignment="Center" SelectionChanged="ComboFontSize_SelectionChanged" ToolTip="Font Size">
+                        <ComboBoxItem Content="10 pt" Tag="10"/>
+                        <ComboBoxItem Content="11 pt" Tag="11"/>
+                        <ComboBoxItem Content="12 pt" Tag="12" IsSelected="True"/>
+                        <ComboBoxItem Content="14 pt" Tag="14"/>
+                        <ComboBoxItem Content="16 pt" Tag="16"/>
+                        <ComboBoxItem Content="18 pt" Tag="18"/>
+                        <ComboBoxItem Content="24 pt" Tag="24"/>
+                        <ComboBoxItem Content="32 pt" Tag="32"/>
                     </ComboBox>
-                    <Button x:Name="BtnConvertNow" Style="{StaticResource FlatButtonStyle}" Height="34" Margin="4,2,0,2" Padding="8,2" Click="BtnConvertNow_Click" ToolTip="Convert pending handwritten strokes to text right now">
-                        <TextBlock Text="✓ Convert" FontSize="11.5" FontWeight="SemiBold" Foreground="{StaticResource OneNotePurple}"/>
+
+                    <!-- Bold / Italic / Underline -->
+                    <ToggleButton x:Name="BtnBold" Style="{StaticResource ToggleToolStyle}" Command="EditingCommands.ToggleBold" CommandTarget="{Binding ElementName=DocumentEditor}" ToolTip="Bold (Ctrl+B)">
+                        <TextBlock Text="B" FontWeight="Bold" FontFamily="Times New Roman" FontSize="14"/>
+                    </ToggleButton>
+                    <ToggleButton x:Name="BtnItalic" Style="{StaticResource ToggleToolStyle}" Command="EditingCommands.ToggleItalic" CommandTarget="{Binding ElementName=DocumentEditor}" ToolTip="Italic (Ctrl+I)">
+                        <TextBlock Text="I" FontStyle="Italic" FontFamily="Times New Roman" FontSize="14"/>
+                    </ToggleButton>
+                    <ToggleButton x:Name="BtnUnderline" Style="{StaticResource ToggleToolStyle}" Command="EditingCommands.ToggleUnderline" CommandTarget="{Binding ElementName=DocumentEditor}" ToolTip="Underline (Ctrl+U)">
+                        <TextBlock Text="U" TextDecorations="Underline" FontFamily="Times New Roman" FontSize="14"/>
+                    </ToggleButton>
+
+                    <Rectangle Width="1" Height="22" Fill="#E2E8F0" Margin="4,0"/>
+
+                    <!-- Alignment -->
+                    <Button Style="{StaticResource FlatButtonStyle}" Command="EditingCommands.AlignLeft" CommandTarget="{Binding ElementName=DocumentEditor}" ToolTip="Align Left" Width="34" Padding="0">
+                        <TextBlock Text="⫷" FontSize="13"/>
                     </Button>
-                </StackPanel>
+                    <Button Style="{StaticResource FlatButtonStyle}" Command="EditingCommands.AlignCenter" CommandTarget="{Binding ElementName=DocumentEditor}" ToolTip="Align Center" Width="34" Padding="0">
+                        <TextBlock Text="≡" FontSize="14"/>
+                    </Button>
+                    <Button Style="{StaticResource FlatButtonStyle}" Command="EditingCommands.AlignRight" CommandTarget="{Binding ElementName=DocumentEditor}" ToolTip="Align Right" Width="34" Padding="0">
+                        <TextBlock Text="⫸" FontSize="13"/>
+                    </Button>
+                    <Button Style="{StaticResource FlatButtonStyle}" Command="EditingCommands.AlignJustify" CommandTarget="{Binding ElementName=DocumentEditor}" ToolTip="Justify" Width="34" Padding="0">
+                        <TextBlock Text="☰" FontSize="13"/>
+                    </Button>
 
-                <!-- Color Palette & Color Wheel Picker -->
-                <StackPanel x:Name="ColorSectionPanel" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,6,0">
-                    <Rectangle Width="1" Height="24" Fill="#E2E8F0" Margin="4,0,8,0"/>
+                    <Rectangle Width="1" Height="22" Fill="#E2E8F0" Margin="4,0"/>
 
-                    <!-- Standard Pen Colors -->
+                    <!-- Bullet & Numbered Lists -->
+                    <Button Style="{StaticResource FlatButtonStyle}" Command="EditingCommands.ToggleBullets" CommandTarget="{Binding ElementName=DocumentEditor}" ToolTip="Bulleted List" Padding="8,4">
+                        <TextBlock Text="• List" FontSize="12"/>
+                    </Button>
+                    <Button Style="{StaticResource FlatButtonStyle}" Command="EditingCommands.ToggleNumbering" CommandTarget="{Binding ElementName=DocumentEditor}" ToolTip="Numbered List" Padding="8,4">
+                        <TextBlock Text="1. List" FontSize="12"/>
+                    </Button>
+                </WrapPanel>
+
+                <!-- ========= DRAW MODE TOOLBAR ========= -->
+                <WrapPanel x:Name="DrawToolbarPanel" Orientation="Horizontal" VerticalAlignment="Center" Visibility="Collapsed" Margin="0,0,6,0">
+                    <RadioButton x:Name="ToolPen" GroupName="DrawSubTool" Style="{StaticResource ToolButtonStyle}" IsChecked="True" Click="DrawSubTool_Click" ToolTip="Ballpoint Pen (Auto-enhances shapes when Shape Assist is ON)">
+                        <TextBlock Text="✏️ Pen" FontWeight="SemiBold" FontSize="12"/>
+                    </RadioButton>
+
+                    <RadioButton x:Name="ToolWriteText" GroupName="DrawSubTool" Style="{StaticResource ToolButtonStyle}" Click="DrawSubTool_Click" ToolTip="Handwriting-to-Text (Inserts cursive English or Bulgarian directly into the document in Times New Roman)">
+                        <TextBlock Text="✍️ Write→Text" FontWeight="SemiBold" FontSize="12"/>
+                    </RadioButton>
+
+                    <RadioButton x:Name="ToolHighlighter" GroupName="DrawSubTool" Style="{StaticResource ToolButtonStyle}" Click="DrawSubTool_Click" ToolTip="Highlighter (Translucent bright colors)">
+                        <TextBlock Text="🖍️ Highlight" FontWeight="SemiBold" FontSize="12"/>
+                    </RadioButton>
+
+                    <RadioButton x:Name="ToolEraser" GroupName="DrawSubTool" Style="{StaticResource ToolButtonStyle}" Click="DrawSubTool_Click" ToolTip="Eraser (or flip your Lenovo pen)">
+                        <TextBlock Text="🧹 Eraser" FontWeight="SemiBold" FontSize="12"/>
+                    </RadioButton>
+
+                    <RadioButton x:Name="ToolSelect" GroupName="DrawSubTool" Style="{StaticResource ToolButtonStyle}" Click="DrawSubTool_Click" ToolTip="Lasso Select &amp; Move">
+                        <TextBlock Text="⬚ Lasso" FontWeight="SemiBold" FontSize="12"/>
+                    </RadioButton>
+
+                    <!-- Shape Assist Toggle (Default ON) -->
+                    <ToggleButton x:Name="ToggleShapeAssist" Style="{StaticResource ToggleToolStyle}" IsChecked="True" Click="ToggleShapeAssist_Click" ToolTip="Automatically snap rough circles, lines, arrows, rectangles, triangles, and diamonds into clean shapes">
+                        <TextBlock x:Name="TxtShapeAssistLabel" Text="🔷 Shape Assist: ON" FontSize="11.5" FontWeight="SemiBold"/>
+                    </ToggleButton>
+
+                    <!-- Write->Text Language Selector -->
+                    <StackPanel x:Name="WriteModeControlsPanel" Orientation="Horizontal" VerticalAlignment="Center" Visibility="Collapsed" Margin="2,0">
+                        <ComboBox x:Name="ComboWriteLanguage" Width="116" Height="34" Margin="2,2" VerticalContentAlignment="Center" SelectionChanged="ComboWriteLanguage_SelectionChanged" ToolTip="Handwriting Language">
+                            <ComboBoxItem Content="🇬🇧 English" Tag="English" IsSelected="True"/>
+                            <ComboBoxItem Content="🇧🇬 Български" Tag="Bulgarian"/>
+                        </ComboBox>
+                        <Button x:Name="BtnConvertNow" Style="{StaticResource FlatButtonStyle}" Height="34" Padding="8,2" Click="BtnConvertNow_Click" ToolTip="Convert pending handwritten strokes to document text now">
+                            <TextBlock Text="✓ Convert" FontSize="11.5" FontWeight="SemiBold" Foreground="{StaticResource OneNotePurple}"/>
+                        </Button>
+                    </StackPanel>
+
+                    <Rectangle Width="1" Height="22" Fill="#E2E8F0" Margin="4,0"/>
+
+                    <!-- Pen Colors -->
                     <StackPanel x:Name="PenColorsPanel" Orientation="Horizontal" VerticalAlignment="Center">
                         <Button Background="#0F172A" Style="{StaticResource ColorChipStyle}" ToolTip="Black (#0F172A)" Click="ColorChip_Click"/>
                         <Button Background="#2563EB" Style="{StaticResource ColorChipStyle}" ToolTip="Navy Blue (#2563EB)" Click="ColorChip_Click"/>
@@ -223,7 +332,7 @@
                         <Button Background="#EA580C" Style="{StaticResource ColorChipStyle}" ToolTip="Orange (#EA580C)" Click="ColorChip_Click"/>
                     </StackPanel>
 
-                    <!-- Highlighter-Only Bright Colors (Removes dark/black colors when Highlighter is chosen) -->
+                    <!-- Highlighter-Only Bright Colors -->
                     <StackPanel x:Name="HighlighterColorsPanel" Orientation="Horizontal" VerticalAlignment="Center" Visibility="Collapsed">
                         <Button Background="#FACC15" Style="{StaticResource ColorChipStyle}" ToolTip="Yellow Highlighter (#FACC15)" Click="ColorChip_Click"/>
                         <Button Background="#86EFAC" Style="{StaticResource ColorChipStyle}" ToolTip="Mint Green Highlighter (#86EFAC)" Click="ColorChip_Click"/>
@@ -233,71 +342,58 @@
                         <Button Background="#D8B4FE" Style="{StaticResource ColorChipStyle}" ToolTip="Lavender Highlighter (#D8B4FE)" Click="ColorChip_Click"/>
                     </StackPanel>
 
-                    <!-- Color Wheel + Hex Search Button -->
-                    <Button x:Name="BtnColorWheel" Style="{StaticResource FlatButtonStyle}" Height="34" Margin="6,2,0,2" Padding="8,2" Click="BtnColorWheel_Click" ToolTip="Open Color Wheel &amp; Search by Hex or Name">
+                    <!-- Color Wheel / Hex Search -->
+                    <Button x:Name="BtnColorWheel" Style="{StaticResource FlatButtonStyle}" Height="34" Margin="4,2,2,2" Padding="8,2" Click="BtnColorWheel_Click" ToolTip="Open Color Wheel &amp; Search by Hex or Name">
                         <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                            <Ellipse x:Name="ActiveColorDot" Width="15" Height="15" Fill="#0F172A" Stroke="#64748B" StrokeThickness="1.2" Margin="0,0,5,0"/>
+                            <Ellipse x:Name="ActiveColorDot" Width="14" Height="14" Fill="#0F172A" Stroke="#64748B" StrokeThickness="1.2" Margin="0,0,5,0"/>
                             <TextBlock Text="🎨 Wheel / Hex" FontSize="11.5" FontWeight="SemiBold" VerticalAlignment="Center"/>
                         </StackPanel>
                     </Button>
 
-                    <!-- Popup hosting ColorWheelPicker -->
                     <Popup x:Name="ColorWheelPopup" PlacementTarget="{Binding ElementName=BtnColorWheel}" Placement="Bottom" StaysOpen="False" AllowsTransparency="True" PopupAnimation="Fade">
                         <controls:ColorWheelPicker x:Name="ColorWheelControl" Margin="4"/>
                     </Popup>
-                </StackPanel>
 
-                <!-- Thickness & Paper Style Dropdowns -->
-                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,6,0">
-                    <Rectangle Width="1" Height="24" Fill="#E2E8F0" Margin="4,0,8,0"/>
-
-                    <ComboBox x:Name="ComboStrokeThickness" Margin="2,2" Width="104" Height="34" VerticalContentAlignment="Center" SelectionChanged="ComboStrokeThickness_SelectionChanged" ToolTip="Stroke Size">
+                    <!-- Stroke Thickness -->
+                    <ComboBox x:Name="ComboStrokeThickness" Margin="4,2" Width="102" Height="34" VerticalContentAlignment="Center" SelectionChanged="ComboStrokeThickness_SelectionChanged" ToolTip="Stroke Size">
                         <ComboBoxItem Content="Fine (2pt)" Tag="2" IsSelected="True"/>
                         <ComboBoxItem Content="Medium (4pt)" Tag="4"/>
                         <ComboBoxItem Content="Thick (8pt)" Tag="8"/>
                         <ComboBoxItem Content="Marker (16pt)" Tag="16"/>
                     </ComboBox>
+                </WrapPanel>
 
-                    <ComboBox x:Name="ComboPaperStyle" Margin="4,2" Width="114" Height="34" VerticalContentAlignment="Center" SelectionChanged="ComboPaperStyle_SelectionChanged" ToolTip="Paper Background">
-                        <ComboBoxItem Content="Ruled / Lined" Tag="Ruled" IsSelected="True"/>
-                        <ComboBoxItem Content="Grid Paper" Tag="Grid"/>
-                        <ComboBoxItem Content="Blank Sheet" Tag="Blank"/>
-                    </ComboBox>
-                </StackPanel>
-
-                <!-- Utility Actions -->
+                <!-- ========= SHARED PAGE & UTILITY ACTIONS ========= -->
                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                    <Rectangle Width="1" Height="24" Fill="#E2E8F0" Margin="4,0,6,0"/>
+                    <Rectangle Width="1" Height="22" Fill="#E2E8F0" Margin="4,0,6,0"/>
 
-                    <Button x:Name="BtnUndo" Style="{StaticResource FlatButtonStyle}" ToolTip="Undo Ink (Ctrl+Z)" Click="BtnUndo_Click" Width="36" Height="34" Padding="0">
+                    <ComboBox x:Name="ComboPaperStyle" Margin="2,2" Width="110" Height="34" VerticalContentAlignment="Center" SelectionChanged="ComboPaperStyle_SelectionChanged" ToolTip="Page Background">
+                        <ComboBoxItem Content="Blank Page" Tag="Blank" IsSelected="True"/>
+                        <ComboBoxItem Content="Ruled / Lined" Tag="Ruled"/>
+                        <ComboBoxItem Content="Grid Paper" Tag="Grid"/>
+                    </ComboBox>
+
+                    <Button x:Name="BtnUndo" Style="{StaticResource FlatButtonStyle}" ToolTip="Undo (Ctrl+Z)" Click="BtnUndo_Click" Width="34" Height="34" Padding="0">
                         <TextBlock Text="↩" FontSize="15" FontWeight="Bold"/>
                     </Button>
-                    <Button x:Name="BtnRedo" Style="{StaticResource FlatButtonStyle}" ToolTip="Redo Ink (Ctrl+Y)" Click="BtnRedo_Click" Width="36" Height="34" Padding="0">
+                    <Button x:Name="BtnRedo" Style="{StaticResource FlatButtonStyle}" ToolTip="Redo (Ctrl+Y)" Click="BtnRedo_Click" Width="34" Height="34" Padding="0">
                         <TextBlock Text="↪" FontSize="15" FontWeight="Bold"/>
                     </Button>
-                    <Button x:Name="BtnClear" Style="{StaticResource FlatButtonStyle}" Height="34" ToolTip="Clear Page Ink" Click="BtnClear_Click">
-                        <StackPanel Orientation="Horizontal">
-                            <TextBlock Text="🗑️" Margin="0,0,3,0" FontSize="12" VerticalAlignment="Center"/>
-                            <TextBlock Text="Clear" FontSize="11.5" FontWeight="SemiBold" VerticalAlignment="Center"/>
-                        </StackPanel>
+                    <Button x:Name="BtnClear" Style="{StaticResource FlatButtonStyle}" Height="34" ToolTip="Clear Ink Strokes on Page" Click="BtnClear_Click">
+                        <TextBlock Text="🗑️ Clear Ink" FontSize="11.5" FontWeight="SemiBold"/>
                     </Button>
-                    <Button x:Name="BtnExport" Style="{StaticResource FlatButtonStyle}" Height="34" ToolTip="Export Note as Image (PNG)" Click="BtnExport_Click">
-                        <StackPanel Orientation="Horizontal">
-                            <TextBlock Text="💾" Margin="0,0,3,0" FontSize="12" VerticalAlignment="Center"/>
-                            <TextBlock Text="Export" FontSize="11.5" FontWeight="SemiBold" VerticalAlignment="Center"/>
-                        </StackPanel>
+                    <Button x:Name="BtnExport" Style="{StaticResource FlatButtonStyle}" Height="34" ToolTip="Export Page as PNG Image" Click="BtnExport_Click">
+                        <TextBlock Text="💾 Export" FontSize="11.5" FontWeight="SemiBold"/>
                     </Button>
                 </StackPanel>
             </WrapPanel>
         </Border>
 
-        <!-- ================= MAIN BODY (Sidebar & Canvas) ================= -->
+        <!-- ================= MAIN BODY (Sidebar + Word-Style Document Surface) ================= -->
         <Grid Grid.Row="1">
             <Grid.ColumnDefinitions>
-                <!-- Left Sidebar: Notebooks / Sections / Pages -->
-                <ColumnDefinition x:Name="SidebarColDef" Width="290" MinWidth="0" MaxWidth="420"/>
-                <ColumnDefinition x:Name="SplitterColDef" Width="Auto"/>
-                <!-- Canvas Area -->
+                <ColumnDefinition x:Name="SidebarColDef" Width="280" MinWidth="0" MaxWidth="400"/>
+                <ColumnDefinition Width="Auto"/>
                 <ColumnDefinition Width="*"/>
             </Grid.ColumnDefinitions>
 
@@ -317,17 +413,13 @@
                                 <RowDefinition Height="Auto"/>
                                 <RowDefinition Height="Auto"/>
                             </Grid.RowDefinitions>
-
                             <TextBlock Grid.Row="0" Text="NOTEBOOK" FontSize="10" FontWeight="Bold" Foreground="#94A3B8" Margin="0,0,0,4"/>
-
                             <Grid Grid.Row="1">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*"/>
                                     <ColumnDefinition Width="Auto"/>
                                 </Grid.ColumnDefinitions>
-
                                 <ComboBox x:Name="ComboNotebooks" Grid.Column="0" Height="34" VerticalContentAlignment="Center" SelectionChanged="ComboNotebooks_SelectionChanged" DisplayMemberPath="Name"/>
-
                                 <Button x:Name="BtnNewNotebook" Grid.Column="1" Margin="6,0,0,0" Style="{StaticResource FlatButtonStyle}" Height="34" Width="34" Padding="0" ToolTip="Create New Notebook" Click="BtnNewNotebook_Click">
                                     <TextBlock Text="+" FontSize="16" FontWeight="Bold" Foreground="{StaticResource OneNotePurple}"/>
                                 </Button>
@@ -342,17 +434,12 @@
                                 <RowDefinition Height="Auto"/>
                                 <RowDefinition Height="Auto"/>
                             </Grid.RowDefinitions>
-
                             <Grid Grid.Row="0" Margin="0,0,0,6">
                                 <TextBlock Text="SECTIONS" FontSize="10" FontWeight="Bold" Foreground="#94A3B8" VerticalAlignment="Center"/>
                                 <Button x:Name="BtnNewSection" HorizontalAlignment="Right" Style="{StaticResource FlatButtonStyle}" Height="24" Padding="6,1" Click="BtnNewSection_Click">
-                                    <StackPanel Orientation="Horizontal">
-                                        <TextBlock Text="+" FontWeight="Bold" FontSize="12" Margin="0,0,2,0"/>
-                                        <TextBlock Text="Section" FontSize="11"/>
-                                    </StackPanel>
+                                    <TextBlock Text="+ Section" FontSize="11"/>
                                 </Button>
                             </Grid>
-
                             <ListBox x:Name="ListSections" Grid.Row="1" MaxHeight="140" ScrollViewer.HorizontalScrollBarVisibility="Disabled" BorderThickness="0" Background="Transparent" SelectionChanged="ListSections_SelectionChanged">
                                 <ListBox.ItemContainerStyle>
                                     <Style TargetType="ListBoxItem">
@@ -396,23 +483,18 @@
                             <RowDefinition Height="Auto"/>
                             <RowDefinition Height="*"/>
                         </Grid.RowDefinitions>
-
                         <Grid Grid.Row="0" Margin="0,0,0,8">
                             <TextBlock Text="PAGES" FontSize="10" FontWeight="Bold" Foreground="#94A3B8" VerticalAlignment="Center"/>
                             <Button x:Name="BtnNewPage" HorizontalAlignment="Right" Background="{StaticResource OneNotePurple}" Foreground="White" BorderThickness="0" Height="28" Padding="10,2" Cursor="Hand" Click="BtnNewPage_Click">
                                 <Button.Template>
                                     <ControlTemplate TargetType="Button">
                                         <Border Background="{TemplateBinding Background}" CornerRadius="4" Padding="{TemplateBinding Padding}">
-                                            <StackPanel Orientation="Horizontal">
-                                                <TextBlock Text="+" FontWeight="Bold" FontSize="13" Margin="0,0,4,0" Foreground="White"/>
-                                                <TextBlock Text="Add Page" FontSize="11" FontWeight="SemiBold" Foreground="White"/>
-                                            </StackPanel>
+                                            <TextBlock Text="+ Add Page" FontSize="11" FontWeight="SemiBold" Foreground="White"/>
                                         </Border>
                                     </ControlTemplate>
                                 </Button.Template>
                             </Button>
                         </Grid>
-
                         <ListBox x:Name="ListPages" Grid.Row="1" BorderThickness="0" Background="Transparent" SelectionChanged="ListPages_SelectionChanged">
                             <ListBox.ItemContainerStyle>
                                 <Style TargetType="ListBoxItem">
@@ -447,12 +529,10 @@
                                             <ColumnDefinition Width="*"/>
                                             <ColumnDefinition Width="Auto"/>
                                         </Grid.ColumnDefinitions>
-
                                         <StackPanel Grid.Column="0">
                                             <TextBlock Text="{Binding Title}" FontSize="13" FontWeight="SemiBold" Foreground="#1E293B" TextTrimming="CharacterEllipsis"/>
                                             <TextBlock Text="{Binding CreatedAt, StringFormat='{}{0:MMM dd, yyyy  h:mm tt}'}" FontSize="10" Foreground="#64748B" Margin="0,2,0,0"/>
                                         </StackPanel>
-
                                         <Button Grid.Column="1" Content="✕" Width="18" Height="18" FontSize="9" Foreground="#94A3B8" Background="Transparent" BorderThickness="0" Cursor="Hand" Click="BtnDeletePage_Click" ToolTip="Delete Page" Tag="{Binding Id}"/>
                                     </Grid>
                                 </DataTemplate>
@@ -462,58 +542,105 @@
                 </Grid>
             </Border>
 
-            <!-- Splitter to resize sidebar -->
-            <GridSplitter x:Name="SidebarSplitter" Grid.Column="1" Width="3" HorizontalAlignment="Center" VerticalAlignment="Stretch" Background="#E2E8F0"/>
+            <GridSplitter x:Name="SidebarSplitter" Grid.Column="1" Width="3" HorizontalAlignment="Center" VerticalAlignment="Stretch" Background="#CBD5E1"/>
 
-            <!-- ================= MAIN CANVAS ================= -->
-            <Grid Grid.Column="2">
-                <ScrollViewer x:Name="CanvasScrollViewer" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto" Background="#FFFFFF">
-                    <Grid x:Name="CanvasContainer" Width="2600" Height="3600" Background="#FFFFFF">
-                        <!-- Background Paper Pattern (Ruled / Grid / Blank) -->
+            <!-- ================= WORD-STYLE DOCUMENT + INK SURFACE ================= -->
+            <ScrollViewer x:Name="CanvasScrollViewer" Grid.Column="2"
+                          Background="#E2E8F0"
+                          VerticalScrollBarVisibility="Auto"
+                          HorizontalScrollBarVisibility="Auto"
+                          PanningMode="VerticalOnly">
+
+                <!-- Centered Word-like White Page -->
+                <Border x:Name="PageSheetContainer"
+                        Background="#FFFFFF"
+                        BorderBrush="#CBD5E1"
+                        BorderThickness="1"
+                        CornerRadius="2"
+                        Margin="28,24,28,48"
+                        Width="820"
+                        MinHeight="1100"
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Top"
+                        SnapsToDevicePixels="True">
+                    <Border.Effect>
+                        <DropShadowEffect BlurRadius="16" Direction="270" ShadowDepth="3" Opacity="0.12" Color="#0F172A"/>
+                    </Border.Effect>
+
+                    <!-- Layered Page Content: Paper Background -> Unified RichTextBox -> Coexisting InkCanvas -->
+                    <Grid x:Name="PageContentGrid" MinHeight="1100">
+                        <!-- Layer 0: Paper Background (Blank / Ruled / Grid) -->
                         <Border x:Name="PaperBackgroundBorder" Background="#FFFFFF"/>
 
-                        <!-- Responsive OneNote Page Title Header Area -->
-                        <StackPanel x:Name="PageHeaderPanel" Margin="48,36,48,0" VerticalAlignment="Top" HorizontalAlignment="Left" Width="820">
-                            <TextBox x:Name="TxtPageTitle" 
-                                     Text="Untitled Page" 
-                                     FontSize="28" 
-                                     FontWeight="Bold" 
-                                     Foreground="#0F172A" 
-                                     Background="Transparent" 
-                                     BorderThickness="0" 
-                                     Padding="0,0,0,4"
-                                     TextChanged="TxtPageTitle_TextChanged"/>
+                        <!-- Layer 1: Continuous Word-Style Document -->
+                        <Grid Margin="64,48,64,64">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="*"/>
+                            </Grid.RowDefinitions>
 
-                            <TextBlock x:Name="TxtPageTimestamp" 
-                                       Text="Monday, November 23, 2026" 
-                                       FontSize="12" 
-                                       Foreground="#64748B" 
-                                       Margin="2,0,0,12"/>
+                            <!-- Document Title & Date -->
+                            <StackPanel Grid.Row="0" Margin="0,0,0,14">
+                                <TextBox x:Name="TxtPageTitle"
+                                         Text="Untitled Page"
+                                         FontFamily="Times New Roman, Times, Liberation Serif"
+                                         FontSize="28"
+                                         FontWeight="Bold"
+                                         Foreground="#0F172A"
+                                         Background="Transparent"
+                                         BorderThickness="0"
+                                         Padding="0,0,0,4"
+                                         TextChanged="TxtPageTitle_TextChanged"/>
 
-                            <Rectangle Height="1" Fill="#CBD5E1" HorizontalAlignment="Stretch" Margin="0,0,0,20"/>
-                        </StackPanel>
+                                <TextBlock x:Name="TxtPageTimestamp"
+                                           Text="Monday, November 23, 2026"
+                                           FontFamily="Times New Roman, Times, Liberation Serif"
+                                           FontSize="12"
+                                           Foreground="#64748B"
+                                           Margin="2,0,0,10"/>
 
-                        <!-- WPF InkCanvas: Freeform Drawing + Children Floating Notes -->
-                        <InkCanvas x:Name="MainInkCanvas" 
-                                   Background="Transparent" 
-                                   Margin="0,120,0,0"
-                                   PreviewMouseLeftButtonDown="MainInkCanvas_PreviewMouseLeftButtonDown"
+                                <Rectangle Height="1" Fill="#CBD5E1" HorizontalAlignment="Stretch"/>
+                            </StackPanel>
+
+                            <!-- Continuous Word-like Document Surface (Times New Roman 12pt default) -->
+                            <RichTextBox x:Name="DocumentEditor"
+                                         Grid.Row="1"
+                                         MinHeight="900"
+                                         Background="Transparent"
+                                         BorderThickness="0"
+                                         Padding="0,4,0,24"
+                                         FontFamily="Times New Roman, Times, Liberation Serif"
+                                         FontSize="16"
+                                         Foreground="#0F172A"
+                                         AcceptsReturn="True"
+                                         AcceptsTab="True"
+                                         SpellCheck.IsEnabled="True"
+                                         IsUndoEnabled="True"
+                                         VerticalScrollBarVisibility="Disabled"
+                                         SelectionChanged="DocumentEditor_SelectionChanged"
+                                         TextChanged="DocumentEditor_TextChanged"/>
+                        </Grid>
+
+                        <!-- Layer 2: Hardware-Accelerated InkCanvas Coexisting Over the Document -->
+                        <InkCanvas x:Name="MainInkCanvas"
+                                   Background="Transparent"
+                                   IsHitTestVisible="False"
                                    StrokeCollected="MainInkCanvas_StrokeCollected"
                                    StrokeErased="MainInkCanvas_StrokeErased"/>
                     </Grid>
-                </ScrollViewer>
-            </Grid>
+                </Border>
+            </ScrollViewer>
         </Grid>
 
         <!-- ================= STATUS BAR ================= -->
         <Border Grid.Row="2" Background="#F8FAFC" BorderBrush="#E2E8F0" BorderThickness="0,1,0,0" Padding="12,4">
             <Grid>
-                <TextBlock x:Name="StatusModeText" Text="Type Mode — Click anywhere on the canvas to create a floating note" FontSize="11.5" Foreground="#475569" VerticalAlignment="Center"/>
-                <TextBlock x:Name="StatusColorText" Text="Color: #0F172A" FontSize="11.5" FontFamily="Consolas" Foreground="#64748B" HorizontalAlignment="Right" VerticalAlignment="Center"/>
+                <TextBlock x:Name="StatusModeText" Text="Type Mode — Word document surface (Times New Roman, 12 pt)" FontSize="11.5" Foreground="#475569" VerticalAlignment="Center"/>
+                <TextBlock x:Name="StatusRightText" Text="Times New Roman 12 pt" FontSize="11.5" FontFamily="Consolas" Foreground="#64748B" HorizontalAlignment="Right" VerticalAlignment="Center"/>
             </Grid>
         </Border>
 
-        <!-- ================= MODAL DIALOG (Prompt for New Notebook/Section) ================= -->
+        <!-- ================= MODAL DIALOG (New Notebook / Section) ================= -->
         <Grid x:Name="ModalOverlay" Grid.RowSpan="3" Background="#80000000" Visibility="Collapsed">
             <Border Background="White" CornerRadius="8" Width="400" MaxWidth="420" Margin="16" HorizontalAlignment="Center" VerticalAlignment="Center" Padding="20">
                 <Border.Effect>
@@ -525,7 +652,7 @@
                     <TextBox x:Name="ModalInput" Height="34" VerticalContentAlignment="Center" FontSize="14" Padding="6,2" Margin="0,0,0,16"/>
                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
                         <Button Content="Cancel" Style="{StaticResource FlatButtonStyle}" Width="80" Click="ModalCancel_Click" Margin="0,0,8,0"/>
-                        <Button x:Name="ModalConfirmButton" Content="Create" Background="{StaticResource OneNotePurple}" Foreground="White" Width="90" Height="38" FontWeight="SemiBold" Cursor="Hand" Click="ModalConfirm_Click">
+                        <Button x:Name="ModalConfirmButton" Content="Create" Background="{StaticResource OneNotePurple}" Foreground="White" Width="90" Height="36" FontWeight="SemiBold" Cursor="Hand" Click="ModalConfirm_Click">
                             <Button.Template>
                                 <ControlTemplate TargetType="Button">
                                     <Border Background="{TemplateBinding Background}" CornerRadius="6">
