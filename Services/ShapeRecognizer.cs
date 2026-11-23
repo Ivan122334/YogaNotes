@@ -22,11 +22,6 @@ public readonly record struct ShapeRecognitionResult(Stroke? CleanedStroke, Reco
     public bool IsRecognized => CleanedStroke != null && Kind != RecognizedShapeKind.None;
 }
 
-/// <summary>
-/// Fast geometric stroke analyzer that detects common shapes (line, arrow, circle, ellipse,
-/// rectangle, square, triangle, diamond) on pen-up and replaces them with crisp vector strokes.
-/// Uses strict confidence thresholds so handwriting and freehand art are never distorted.
-/// </summary>
 public static class ShapeRecognizer
 {
     public static ShapeRecognitionResult Analyze(Stroke rawStroke)
@@ -36,22 +31,18 @@ public static class ShapeRecognizer
 
         var bounds = rawStroke.GetBounds();
         double diagonal = Math.Sqrt(bounds.Width * bounds.Width + bounds.Height * bounds.Height);
-        if (diagonal < 32) return default; // Ignore small marks & handwriting letters
+        if (diagonal < 32) return default; // Ignore small marks and individual letters.
 
         double pathLength = ComputePathLength(pts);
         if (pathLength < 32) return default;
 
         double startEndDist = Distance(pts[0], pts[^1]);
 
-        // -----------------------------------------------------------------
-        // 1. STRAIGHT LINE (open stroke with high straightness ratio)
-        // -----------------------------------------------------------------
         if (startEndDist / pathLength > 0.93)
         {
             var start = pts[0];
             var end = pts[^1];
 
-            // Snap nearly horizontal or vertical lines (within ~5 degrees)
             double dx = Math.Abs(end.X - start.X);
             double dy = Math.Abs(end.Y - start.Y);
             if (dy < dx * 0.085) end.Y = start.Y;
@@ -61,26 +52,18 @@ public static class ShapeRecognizer
             return new ShapeRecognitionResult(lineStroke, RecognizedShapeKind.Line);
         }
 
-        // -----------------------------------------------------------------
-        // 2. SINGLE-STROKE ARROW (straight shaft + sharp arrowhead hook at end)
-        // -----------------------------------------------------------------
-        var arrowResult = TryRecognizeArrow(pts, diagonal, pathLength, rawStroke.DrawingAttributes);
+        var arrowResult = TryRecognizeArrow(pts, diagonal, rawStroke.DrawingAttributes);
         if (arrowResult.IsRecognized)
         {
             return arrowResult;
         }
 
-        // -----------------------------------------------------------------
-        // 3. CLOSED SHAPES (start & end points close relative to size)
-        // -----------------------------------------------------------------
         bool isClosed = startEndDist < Math.Max(diagonal * 0.28, 30);
         if (!isClosed) return default;
 
-        // Reject excessively squiggly / multi-loop strokes (e.g. cursive words)
-        double perimeterRatio = pathLength / diagonal;
-        if (perimeterRatio > 5.2) return default;
+        // Reject multi-loop strokes like cursive words.
+        if (pathLength / diagonal > 5.2) return default;
 
-        // Simplify closed contour using Ramer-Douglas-Peucker
         var closedPts = new List<Point>(pts) { pts[0] };
         double epsilon = diagonal * 0.06;
         var simplified = RamerDouglasPeucker(closedPts, epsilon);
@@ -90,7 +73,6 @@ public static class ShapeRecognizer
         }
         simplified = MergeCloseVertices(simplified, diagonal * 0.11);
 
-        // Compute ellipse radial fit error around bounding-box center
         double cx = bounds.X + bounds.Width / 2.0;
         double cy = bounds.Y + bounds.Height / 2.0;
         double rx = Math.Max(bounds.Width / 2.0, 1.0);
@@ -110,86 +92,70 @@ public static class ShapeRecognizer
         double bboxArea = Math.Max(bounds.Width * bounds.Height, 1.0);
         double fillRatio = polyArea / bboxArea;
 
-        // -----------------------------------------------------------------
-        // 4. TRIANGLE (3 simplified corners + triangular area ratio)
-        // -----------------------------------------------------------------
         if (simplified.Count == 3 && fillRatio >= 0.30 && fillRatio <= 0.68)
         {
-            // Verify sides are reasonably straight
-            double triPerimeter = ComputeClosedPerimeter(simplified);
-            if (triPerimeter / pathLength > 0.78)
+            if (ComputeClosedPerimeter(simplified) / pathLength > 0.78)
             {
-                var triStroke = CreatePolygonStroke(simplified, rawStroke.DrawingAttributes);
-                return new ShapeRecognitionResult(triStroke, RecognizedShapeKind.Triangle);
+                return new ShapeRecognitionResult(
+                    CreatePolygonStroke(simplified, rawStroke.DrawingAttributes),
+                    RecognizedShapeKind.Triangle);
             }
         }
 
-        // -----------------------------------------------------------------
-        // 5. RECTANGLE / SQUARE / DIAMOND (4 corners)
-        // -----------------------------------------------------------------
-        if (simplified.Count == 4)
+        if (simplified.Count == 4 && ComputeClosedPerimeter(simplified) / pathLength > 0.80)
         {
-            double quadPerimeter = ComputeClosedPerimeter(simplified);
-            if (quadPerimeter / pathLength > 0.80)
+            if (IsDiamond(simplified, bounds))
             {
-                // Check for Diamond (4 roughly equal sides & corners near bbox edge midpoints)
-                if (IsDiamond(simplified, bounds))
+                var diamondCorners = new List<Point>
                 {
-                    var diamondCorners = new List<Point>
+                    new(cx, bounds.Top),
+                    new(bounds.Right, cy),
+                    new(cx, bounds.Bottom),
+                    new(bounds.Left, cy)
+                };
+                return new ShapeRecognitionResult(
+                    CreatePolygonStroke(diamondCorners, rawStroke.DrawingAttributes),
+                    RecognizedShapeKind.Diamond);
+            }
+
+            if (HasRightAngles(simplified, 24))
+            {
+                if (IsAxisAlignedRectangle(simplified, bounds))
+                {
+                    double w = bounds.Width;
+                    double h = bounds.Height;
+                    double x = bounds.X;
+                    double y = bounds.Y;
+
+                    bool isSquare = Math.Abs(w - h) / Math.Max(w, h) < 0.16;
+                    if (isSquare)
                     {
-                        new(cx, bounds.Top),
-                        new(bounds.Right, cy),
-                        new(cx, bounds.Bottom),
-                        new(bounds.Left, cy)
+                        double side = (w + h) / 2.0;
+                        x = cx - side / 2.0;
+                        y = cy - side / 2.0;
+                        w = side;
+                        h = side;
+                    }
+
+                    var rectCorners = new List<Point>
+                    {
+                        new(x, y),
+                        new(x + w, y),
+                        new(x + w, y + h),
+                        new(x, y + h)
                     };
-                    var diamondStroke = CreatePolygonStroke(diamondCorners, rawStroke.DrawingAttributes);
-                    return new ShapeRecognitionResult(diamondStroke, RecognizedShapeKind.Diamond);
+                    return new ShapeRecognitionResult(
+                        CreatePolygonStroke(rectCorners, rawStroke.DrawingAttributes),
+                        isSquare ? RecognizedShapeKind.Square : RecognizedShapeKind.Rectangle);
                 }
 
-                // Check for Rectangle / Square (angles near 90 degrees)
-                if (HasRightAngles(simplified, toleranceDegrees: 24))
-                {
-                    if (IsAxisAlignedRectangle(simplified, bounds))
-                    {
-                        double w = bounds.Width;
-                        double h = bounds.Height;
-                        double x = bounds.X;
-                        double y = bounds.Y;
-
-                        bool isSquare = Math.Abs(w - h) / Math.Max(w, h) < 0.16;
-                        if (isSquare)
-                        {
-                            double side = (w + h) / 2.0;
-                            x = cx - side / 2.0;
-                            y = cy - side / 2.0;
-                            w = side;
-                            h = side;
-                        }
-
-                        var rectCorners = new List<Point>
-                        {
-                            new(x, y),
-                            new(x + w, y),
-                            new(x + w, y + h),
-                            new(x, y + h)
-                        };
-                        var rectStroke = CreatePolygonStroke(rectCorners, rawStroke.DrawingAttributes);
-                        return new ShapeRecognitionResult(rectStroke, isSquare ? RecognizedShapeKind.Square : RecognizedShapeKind.Rectangle);
-                    }
-                    else
-                    {
-                        // Preserve intentional rotation of a tilted rectangle/square!
-                        var (rotatedCorners, isSquare) = BuildCleanRotatedRectangle(simplified);
-                        var rectStroke = CreatePolygonStroke(rotatedCorners, rawStroke.DrawingAttributes);
-                        return new ShapeRecognitionResult(rectStroke, isSquare ? RecognizedShapeKind.Square : RecognizedShapeKind.Rectangle);
-                    }
-                }
+                var (rotatedCorners, isRotatedSquare) = BuildCleanRotatedRectangle(simplified);
+                return new ShapeRecognitionResult(
+                    CreatePolygonStroke(rotatedCorners, rawStroke.DrawingAttributes),
+                    isRotatedSquare ? RecognizedShapeKind.Square : RecognizedShapeKind.Rectangle);
             }
         }
 
-        // -----------------------------------------------------------------
-        // 6. CIRCLE / ELLIPSE (strict radial consistency & elliptical area)
-        // -----------------------------------------------------------------
         if (stdDev < 0.13 && fillRatio >= 0.60 && fillRatio <= 0.88)
         {
             bool isCircle = Math.Abs(rx - ry) / Math.Max(rx, ry) < 0.18;
@@ -200,27 +166,16 @@ public static class ShapeRecognizer
                 ry = r;
             }
 
-            var ellipsePts = GenerateEllipsePoints(cx, cy, rx, ry, 72);
-            var ellipseStroke = CreateStrokeFromPoints(ellipsePts, rawStroke.DrawingAttributes);
+            var ellipseStroke = CreateStrokeFromPoints(GenerateEllipsePoints(cx, cy, rx, ry, 72), rawStroke.DrawingAttributes);
             return new ShapeRecognitionResult(ellipseStroke, isCircle ? RecognizedShapeKind.Circle : RecognizedShapeKind.Ellipse);
         }
 
-        // Not confidently a known shape -> leave freehand stroke untouched!
         return default;
     }
 
-    /// <summary>
-    /// Backwards-compatible convenience wrapper returning only the cleaned stroke (or null).
-    /// </summary>
-    public static Stroke? TryRecognizeAndCleanShape(Stroke rawStroke) => Analyze(rawStroke).CleanedStroke;
-
-    private static ShapeRecognitionResult TryRecognizeArrow(
-        List<Point> pts, double diagonal, double pathLength, DrawingAttributes attrs)
+    private static ShapeRecognitionResult TryRecognizeArrow(List<Point> pts, double diagonal, DrawingAttributes attrs)
     {
-        // Simplify the open stroke with a moderate tolerance
         var simplified = RamerDouglasPeucker(pts, diagonal * 0.055);
-        // A single-stroke arrow simplifies to 3–5 points:
-        // [Tail, Tip, Wing1] or [Tail, Tip, Wing1, Tip, Wing2] or [Tail, Tip, Wing1, Wing2]
         if (simplified.Count < 3 || simplified.Count > 5) return default;
 
         var tail = simplified[0];
@@ -228,33 +183,29 @@ public static class ShapeRecognizer
         double shaftLen = Distance(tail, tip);
         if (shaftLen < diagonal * 0.55 || shaftLen < 40) return default;
 
-        // Check that the shaft itself (from pts[0] to the tip point) is straight
         int tipIndex = FindClosestPointIndex(pts, tip);
         if (tipIndex < 2 || tipIndex >= pts.Count - 1) return default;
 
         double shaftPathLen = ComputePathLength(pts.Take(tipIndex + 1).ToList());
         if (shaftLen / Math.Max(shaftPathLen, 1.0) < 0.90) return default;
 
-        // Check sharp backward turn at the tip (angle between shaft and first wing < 75 deg)
         var wingEnd = simplified[2];
         double wingLen = Distance(tip, wingEnd);
         if (wingLen < shaftLen * 0.10 || wingLen > shaftLen * 0.55) return default;
 
-        Vector shaftBack = new Vector(tail.X - tip.X, tail.Y - tip.Y);
-        Vector wingVec = new Vector(wingEnd.X - tip.X, wingEnd.Y - tip.Y);
+        Vector shaftBack = new(tail.X - tip.X, tail.Y - tip.Y);
+        Vector wingVec = new(wingEnd.X - tip.X, wingEnd.Y - tip.Y);
         double angle = Math.Abs(Vector.AngleBetween(shaftBack, wingVec));
         if (angle < 12 || angle > 72) return default;
 
-        // Verify the remaining stroke stays near the arrowhead region (not a giant stray tail)
         for (int i = 2; i < simplified.Count; i++)
         {
             if (Distance(tip, simplified[i]) > shaftLen * 0.60)
                 return default;
         }
 
-        // Build a crisp, symmetric arrow (shaft + two 28-degree wings)
         double headLen = Math.Clamp(shaftLen * 0.22, 14, 34);
-        Vector dir = new Vector(tail.X - tip.X, tail.Y - tip.Y);
+        Vector dir = new(tail.X - tip.X, tail.Y - tip.Y);
         dir.Normalize();
 
         var leftWing = RotateVector(dir, 28) * headLen;
@@ -266,8 +217,7 @@ public static class ShapeRecognizer
         arrowPts.AddRange(InterpolateSegment(tip + leftWing, tip, 12));
         arrowPts.AddRange(InterpolateSegment(tip, tip + rightWing, 12));
 
-        var stroke = CreateStrokeFromPoints(arrowPts, attrs);
-        return new ShapeRecognitionResult(stroke, RecognizedShapeKind.Arrow);
+        return new ShapeRecognitionResult(CreateStrokeFromPoints(arrowPts, attrs), RecognizedShapeKind.Arrow);
     }
 
     private static bool IsDiamond(List<Point> corners, Rect bounds)
@@ -285,8 +235,7 @@ public static class ShapeRecognizer
             new Point(bounds.Left, cy)
         };
 
-        int matched = expectedMidpoints.Count(exp => corners.Any(c => Distance(c, exp) < tol));
-        return matched == 4;
+        return expectedMidpoints.Count(exp => corners.Any(c => Distance(c, exp) < tol)) == 4;
     }
 
     private static bool HasRightAngles(List<Point> corners, double toleranceDegrees)
@@ -302,8 +251,7 @@ public static class ShapeRecognizer
             var v2 = next - curr;
             if (v1.Length < 1e-3 || v2.Length < 1e-3) return false;
 
-            double angle = Math.Abs(Vector.AngleBetween(v1, v2));
-            if (Math.Abs(angle - 90.0) > toleranceDegrees)
+            if (Math.Abs(Math.Abs(Vector.AngleBetween(v1, v2)) - 90.0) > toleranceDegrees)
                 return false;
         }
         return true;
@@ -320,13 +268,11 @@ public static class ShapeRecognizer
             new Point(bounds.Left, bounds.Bottom)
         };
 
-        int matched = expected.Count(exp => corners.Any(c => Distance(c, exp) < tol));
-        return matched >= 3;
+        return expected.Count(exp => corners.Any(c => Distance(c, exp) < tol)) >= 3;
     }
 
     private static (List<Point> Corners, bool IsSquare) BuildCleanRotatedRectangle(List<Point> corners)
     {
-        // Compute average center and principal axis from first edge
         double cx = corners.Average(p => p.X);
         double cy = corners.Average(p => p.Y);
         var edge = corners[1] - corners[0];
@@ -334,7 +280,6 @@ public static class ShapeRecognizer
         double cos = Math.Cos(-angle);
         double sin = Math.Sin(-angle);
 
-        // Rotate corners into local axis-aligned frame
         var local = corners.Select(p =>
         {
             double dx = p.X - cx;
@@ -483,14 +428,10 @@ public static class ShapeRecognizer
         for (int i = 1; i < vertices.Count; i++)
         {
             if (Distance(result[^1], vertices[i]) >= minDist)
-            {
                 result.Add(vertices[i]);
-            }
         }
         if (result.Count > 3 && Distance(result[0], result[^1]) < minDist)
-        {
             result.RemoveAt(result.Count - 1);
-        }
         return result;
     }
 

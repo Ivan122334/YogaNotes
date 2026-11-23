@@ -11,29 +11,19 @@ public enum HandwritingLanguage
     Bulgarian
 }
 
-/// <summary>
-/// Wraps Windows native InkRecognizerContainer for offline cursive handwriting recognition
-/// in English and Bulgarian (Cyrillic), preserving line breaks across multi-line notes.
-/// </summary>
 public class HandwritingRecognitionService
 {
     private readonly InkRecognizerContainer _recognizerContainer;
     private readonly InkRecognizer? _englishRecognizer;
     private readonly InkRecognizer? _bulgarianRecognizer;
 
-    public bool IsEnglishAvailable => _englishRecognizer != null;
-    public bool IsBulgarianAvailable => _bulgarianRecognizer != null;
-
     public HandwritingRecognitionService()
     {
         _recognizerContainer = new InkRecognizerContainer();
-        var recognizers = _recognizerContainer.GetRecognizers();
-
-        foreach (var rec in recognizers)
+        foreach (var rec in _recognizerContainer.GetRecognizers())
         {
             var name = rec.Name ?? string.Empty;
-            if (_englishRecognizer == null &&
-                name.Contains("English", StringComparison.OrdinalIgnoreCase))
+            if (_englishRecognizer == null && name.Contains("English", StringComparison.OrdinalIgnoreCase))
             {
                 _englishRecognizer = rec;
             }
@@ -48,10 +38,6 @@ public class HandwritingRecognitionService
         }
     }
 
-    /// <summary>
-    /// Groups strokes into separate horizontal lines and recognizes each line in order,
-    /// preserving line breaks when inserting into the Word-style document.
-    /// </summary>
     public async Task<List<string>> RecognizeLinesAsync(IEnumerable<Stroke> wpfStrokes, HandwritingLanguage language)
     {
         var strokeList = wpfStrokes.Where(s => s.StylusPoints.Count > 0).ToList();
@@ -68,10 +54,8 @@ public class HandwritingRecognitionService
 
         _recognizerContainer.SetDefaultRecognizer(targetRecognizer);
 
-        var lineGroups = GroupStrokesIntoLines(strokeList);
         var recognizedLines = new List<string>();
-
-        foreach (var lineStrokes in lineGroups)
+        foreach (var lineStrokes in GroupStrokesIntoLines(strokeList))
         {
             var text = await RecognizeGroupAsync(lineStrokes);
             if (!string.IsNullOrWhiteSpace(text))
@@ -97,8 +81,7 @@ public class HandwritingRecognitionService
                 inkPoints.Add(new InkPoint(new Windows.Foundation.Point(sp.X, sp.Y), pressure));
             }
 
-            var winrtStroke = builder.CreateStrokeFromInkPoints(inkPoints, Matrix3x2.Identity);
-            winrtContainer.AddStroke(winrtStroke);
+            winrtContainer.AddStroke(builder.CreateStrokeFromInkPoints(inkPoints, Matrix3x2.Identity));
         }
 
         if (winrtContainer.GetStrokes().Count == 0) return string.Empty;
@@ -119,10 +102,6 @@ public class HandwritingRecognitionService
         return string.Join(" ", words);
     }
 
-    /// <summary>
-    /// Clusters strokes into top-to-bottom horizontal writing lines using vertical overlap
-    /// and median stroke height so separate lines produce separate paragraphs.
-    /// </summary>
     private static List<List<Stroke>> GroupStrokesIntoLines(List<Stroke> strokes)
     {
         var items = strokes
@@ -130,7 +109,6 @@ public class HandwritingRecognitionService
             .OrderBy(x => x.Bounds.Top + x.Bounds.Height / 2.0)
             .ToList();
 
-        // Compute a sensible vertical line-break threshold from stroke heights
         var heights = items.Select(x => x.Bounds.Height).Where(h => h > 4).OrderBy(h => h).ToList();
         double medianHeight = heights.Count > 0 ? heights[heights.Count / 2] : 24.0;
         double lineGapThreshold = Math.Max(medianHeight * 0.85, 22.0);
@@ -145,7 +123,6 @@ public class HandwritingRecognitionService
             for (int i = 0; i < lines.Count; i++)
             {
                 var band = lines[i].Band;
-                // Check if stroke overlaps vertically with the band OR sits close to its vertical center
                 bool overlaps = item.Bounds.Top <= band.Bottom + lineGapThreshold * 0.45 &&
                                 item.Bounds.Bottom >= band.Top - lineGapThreshold * 0.45;
                 bool nearCenter = Math.Abs(itemMidY - (band.Top + band.Height / 2.0)) <= lineGapThreshold;

@@ -16,6 +16,7 @@ public class NoteStorageService
     private readonly string _baseDirectory;
     private readonly string _notebooksMetaFile;
     private readonly string _pagesDirectory;
+    private readonly string _windowSettingsFile;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -25,20 +26,79 @@ public class NoteStorageService
 
     public NoteStorageService()
     {
-        var myDocuments = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
-        _baseDirectory = Path.Combine(myDocuments, "YogaNotesData");
+        var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+        _baseDirectory = Path.Combine(appData, "YogaNotes");
         _pagesDirectory = Path.Combine(_baseDirectory, "Pages");
         _notebooksMetaFile = Path.Combine(_baseDirectory, "notebooks.json");
+        _windowSettingsFile = Path.Combine(_baseDirectory, "window.json");
 
         Directory.CreateDirectory(_baseDirectory);
         Directory.CreateDirectory(_pagesDirectory);
+
+        MigrateFromDocumentsIfNeeded();
+    }
+
+    private void MigrateFromDocumentsIfNeeded()
+    {
+        if (File.Exists(_notebooksMetaFile)) return;
+
+        var oldDir = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
+            "YogaNotesData");
+        var oldMeta = Path.Combine(oldDir, "notebooks.json");
+        if (!File.Exists(oldMeta)) return;
+
+        try
+        {
+            File.Copy(oldMeta, _notebooksMetaFile, overwrite: false);
+            var oldPagesDir = Path.Combine(oldDir, "Pages");
+            if (Directory.Exists(oldPagesDir))
+            {
+                foreach (var file in Directory.GetFiles(oldPagesDir, "*.json"))
+                {
+                    var dest = Path.Combine(_pagesDirectory, Path.GetFileName(file));
+                    if (!File.Exists(dest))
+                    {
+                        File.Copy(file, dest);
+                    }
+                }
+            }
+        }
+        catch
+        {
+            // Ignore partial migration errors and fall back to normal loading.
+        }
+    }
+
+    public WindowSettings LoadWindowSettings()
+    {
+        if (!File.Exists(_windowSettingsFile)) return new WindowSettings();
+
+        try
+        {
+            var json = File.ReadAllText(_windowSettingsFile);
+            return JsonSerializer.Deserialize<WindowSettings>(json, JsonOptions) ?? new WindowSettings();
+        }
+        catch
+        {
+            return new WindowSettings();
+        }
+    }
+
+    public void SaveWindowSettings(WindowSettings settings)
+    {
+        try
+        {
+            File.WriteAllText(_windowSettingsFile, JsonSerializer.Serialize(settings, JsonOptions));
+        }
+        catch { }
     }
 
     public List<Notebook> LoadNotebooks()
     {
-        try
+        if (File.Exists(_notebooksMetaFile))
         {
-            if (File.Exists(_notebooksMetaFile))
+            try
             {
                 var json = File.ReadAllText(_notebooksMetaFile);
                 var notebooks = JsonSerializer.Deserialize<List<Notebook>>(json, JsonOptions);
@@ -47,10 +107,7 @@ public class NoteStorageService
                     return notebooks;
                 }
             }
-        }
-        catch (Exception ex)
-        {
-            System.Diagnostics.Debug.WriteLine($"Failed to load notebooks: {ex.Message}");
+            catch { }
         }
 
         return CreateInitialData();
@@ -60,13 +117,9 @@ public class NoteStorageService
     {
         try
         {
-            var json = JsonSerializer.Serialize(notebooks, JsonOptions);
-            File.WriteAllText(_notebooksMetaFile, json);
+            File.WriteAllText(_notebooksMetaFile, JsonSerializer.Serialize(notebooks, JsonOptions));
         }
-        catch (Exception ex)
-        {
-            System.Diagnostics.Debug.WriteLine($"Failed to save notebooks: {ex.Message}");
-        }
+        catch { }
     }
 
     public PageData LoadPage(string pageId, string fallbackTitle = "Untitled Page")
@@ -80,20 +133,17 @@ public class NoteStorageService
                 var data = JsonSerializer.Deserialize<PageData>(json, JsonOptions);
                 if (data != null)
                 {
-                    // One-time migration from legacy floating note bubbles to unified Word document
                     if (string.IsNullOrWhiteSpace(data.DocumentXaml) &&
                         data.LegacyTextBoxes != null &&
                         data.LegacyTextBoxes.Count > 0)
                     {
-                        var mergedText = string.Join(
+                        data.DocumentPlainText = string.Join(
                             "\n\n",
                             data.LegacyTextBoxes
                                 .OrderBy(b => b.Y)
                                 .ThenBy(b => b.X)
                                 .Select(b => b.Text?.Trim())
                                 .Where(t => !string.IsNullOrEmpty(t)));
-
-                        data.DocumentPlainText = mergedText;
                         data.LegacyTextBoxes = null;
                         SavePage(data);
                     }
@@ -101,10 +151,7 @@ public class NoteStorageService
                     return data;
                 }
             }
-            catch (Exception ex)
-            {
-                System.Diagnostics.Debug.WriteLine($"Error loading page {pageId}: {ex.Message}");
-            }
+            catch { }
         }
 
         return new PageData
@@ -122,15 +169,10 @@ public class NoteStorageService
         try
         {
             pageData.UpdatedAt = DateTime.Now;
-            pageData.LegacyTextBoxes = null; // Never re-write legacy bubble format
-            var filePath = GetPageFilePath(pageData.Id);
-            var json = JsonSerializer.Serialize(pageData, JsonOptions);
-            File.WriteAllText(filePath, json);
+            pageData.LegacyTextBoxes = null;
+            File.WriteAllText(GetPageFilePath(pageData.Id), JsonSerializer.Serialize(pageData, JsonOptions));
         }
-        catch (Exception ex)
-        {
-            System.Diagnostics.Debug.WriteLine($"Error saving page {pageData.Id}: {ex.Message}");
-        }
+        catch { }
     }
 
     public void DeletePageFile(string pageId)
@@ -138,22 +180,12 @@ public class NoteStorageService
         var filePath = GetPageFilePath(pageId);
         if (File.Exists(filePath))
         {
-            try
-            {
-                File.Delete(filePath);
-            }
-            catch { }
+            try { File.Delete(filePath); } catch { }
         }
     }
 
-    private string GetPageFilePath(string pageId)
-    {
-        return Path.Combine(_pagesDirectory, $"{pageId}.json");
-    }
+    private string GetPageFilePath(string pageId) => Path.Combine(_pagesDirectory, $"{pageId}.json");
 
-    /// <summary>
-    /// Creates a clean FlowDocument configured with the central Times New Roman 12pt typography.
-    /// </summary>
     public static FlowDocument CreateStyledDocument(string initialPlainText = "")
     {
         var doc = new FlowDocument
@@ -165,24 +197,13 @@ public class NoteStorageService
             PagePadding = new Thickness(0)
         };
 
-        if (!string.IsNullOrEmpty(initialPlainText))
+        var lines = string.IsNullOrEmpty(initialPlainText)
+            ? new[] { string.Empty }
+            : initialPlainText.Replace("\r\n", "\n").Split('\n');
+
+        foreach (var line in lines)
         {
-            var lines = initialPlainText.Replace("\r\n", "\n").Split('\n');
-            foreach (var line in lines)
-            {
-                var p = new Paragraph(new Run(line))
-                {
-                    FontFamily = DocumentTypography.DefaultFontFamily,
-                    FontSize = DocumentTypography.DefaultFontSizeDip,
-                    LineHeight = DocumentTypography.DefaultLineHeight,
-                    Margin = new Thickness(0, 0, 0, 6)
-                };
-                doc.Blocks.Add(p);
-            }
-        }
-        else
-        {
-            doc.Blocks.Add(new Paragraph
+            doc.Blocks.Add(new Paragraph(new Run(line))
             {
                 FontFamily = DocumentTypography.DefaultFontFamily,
                 FontSize = DocumentTypography.DefaultFontSizeDip,
@@ -201,9 +222,7 @@ public class NoteStorageService
 
         using var ms = new MemoryStream();
         range.Save(ms, DataFormats.Xaml);
-        string xaml = Encoding.UTF8.GetString(ms.ToArray());
-
-        return (xaml, plainText);
+        return (Encoding.UTF8.GetString(ms.ToArray()), plainText);
     }
 
     public static FlowDocument DeserializeFlowDocument(string xaml, string plainTextFallback)
@@ -214,29 +233,21 @@ public class NoteStorageService
         {
             try
             {
-                var bytes = Encoding.UTF8.GetBytes(xaml);
-                using var ms = new MemoryStream(bytes);
+                using var ms = new MemoryStream(Encoding.UTF8.GetBytes(xaml));
                 var range = new TextRange(doc.ContentStart, doc.ContentEnd);
                 range.Load(ms, DataFormats.Xaml);
 
-                // Ensure document-level defaults remain Times New Roman
                 doc.FontFamily = DocumentTypography.DefaultFontFamily;
                 doc.FontSize = DocumentTypography.DefaultFontSizeDip;
                 doc.LineHeight = DocumentTypography.DefaultLineHeight;
                 return doc;
             }
-            catch (Exception ex)
-            {
-                System.Diagnostics.Debug.WriteLine($"Failed to deserialize XAML document, falling back to plain text: {ex.Message}");
-            }
+            catch { }
         }
 
-        if (!string.IsNullOrEmpty(plainTextFallback))
-        {
-            return CreateStyledDocument(plainTextFallback);
-        }
-
-        return doc;
+        return !string.IsNullOrEmpty(plainTextFallback)
+            ? CreateStyledDocument(plainTextFallback)
+            : doc;
     }
 
     public static string SerializeStrokes(StrokeCollection strokes)
@@ -252,8 +263,7 @@ public class NoteStorageService
         if (string.IsNullOrWhiteSpace(base64)) return new StrokeCollection();
         try
         {
-            var bytes = Convert.FromBase64String(base64);
-            using var ms = new MemoryStream(bytes);
+            using var ms = new MemoryStream(Convert.FromBase64String(base64));
             return new StrokeCollection(ms);
         }
         catch
@@ -264,8 +274,8 @@ public class NoteStorageService
 
     public static void ExportToPng(FrameworkElement visual, string filePath)
     {
-        var width = (int)Math.Max(visual.ActualWidth, 850);
-        var height = (int)Math.Max(visual.ActualHeight, 1120);
+        int width = (int)Math.Max(visual.ActualWidth, 850);
+        int height = (int)Math.Max(visual.ActualHeight, 1120);
 
         var rtb = new RenderTargetBitmap(width, height, 96, 96, PixelFormats.Pbgra32);
         rtb.Render(visual);
@@ -279,60 +289,38 @@ public class NoteStorageService
 
     private List<Notebook> CreateInitialData()
     {
-        var welcomePage = new PageItem
+        var firstPage = new PageItem
         {
-            Id = Guid.NewGuid().ToString(),
-            Title = "Welcome to YogaNotes",
+            Title = "Untitled Page",
             CreatedAt = DateTime.Now,
             UpdatedAt = DateTime.Now
         };
 
-        var quickNotes = new Section
-        {
-            Id = Guid.NewGuid().ToString(),
-            Name = "Quick Notes",
-            ColorHex = "#7719AA",
-            Pages = new List<PageItem> { welcomePage }
-        };
-
-        var ideasSection = new Section
-        {
-            Id = Guid.NewGuid().ToString(),
-            Name = "Ideas & Sketches",
-            ColorHex = "#0EA5E9",
-            Pages = new List<PageItem>
-            {
-                new() { Title = "Project Ideas", CreatedAt = DateTime.Now }
-            }
-        };
-
         var defaultNotebook = new Notebook
         {
-            Id = Guid.NewGuid().ToString(),
             Name = "My Notebook",
-            Sections = new List<Section> { quickNotes, ideasSection }
+            Sections = new List<Section>
+            {
+                new()
+                {
+                    Name = "Quick Notes",
+                    ColorHex = "#7719AA",
+                    Pages = new List<PageItem> { firstPage }
+                }
+            }
         };
 
         var notebooks = new List<Notebook> { defaultNotebook };
         SaveNotebooks(notebooks);
-
-        string welcomeText =
-            "Welcome to YogaNotes for Lenovo Yoga.\n\n" +
-            "• Word-Style Document: Click anywhere on this page to type in Times New Roman with bold, italic, underline, alignment, and lists.\n" +
-            "• Smart Drawing & Shape Assist: Switch to Draw mode to sketch with pressure sensitivity. Rough circles, rectangles, squares, triangles, straight lines, and arrows automatically snap into crisp shapes (press Ctrl+Z once to revert to your raw stroke).\n" +
-            "• Inline Handwriting-to-Text: Use Write→Text in Draw mode to write in cursive English or Bulgarian — your handwriting converts directly into editable Times New Roman text inside this document.";
-
-        var initialWelcomeData = new PageData
+        SavePage(new PageData
         {
-            Id = welcomePage.Id,
-            Title = welcomePage.Title,
-            CreatedAt = welcomePage.CreatedAt,
+            Id = firstPage.Id,
+            Title = firstPage.Title,
+            CreatedAt = firstPage.CreatedAt,
             UpdatedAt = DateTime.Now,
-            PaperStyle = PaperStyle.Blank,
-            DocumentPlainText = welcomeText
-        };
+            PaperStyle = PaperStyle.Blank
+        });
 
-        SavePage(initialWelcomeData);
         return notebooks;
     }
 }
